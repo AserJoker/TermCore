@@ -1,0 +1,50 @@
+{
+  // ---------------------------------------------------------------------------
+  // clangd
+  //
+  // CMake 已在所有预设中开启 CMAKE_EXPORT_COMPILE_COMMANDS，编译数据库位于
+  //   <preset> = windows-clang | windows-clang-release | windows-msvc
+  // 生成一次即可：cmake --preset windows-clang
+  //
+  // 若在 WSL 里用 VS Code Remote 打开同一仓库，把下面的目录改成
+  //   ${workspaceFolder}/build/linux-clang
+  // ---------------------------------------------------------------------------
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/build/windows-clang",
+    "--background-index",
+    "--background-index-priority=normal",
+    "--pch-storage=memory",
+    "--header-insertion=never",
+    "--completion-style=detailed",
+    "--all-scopes-completion",
+    "--clang-tidy=false"
+  ],
+
+  // 构建前不存在 compile_commands.json 时，clangd 会退化为猜测标志；
+  // 关掉自动更新检查，避免每次启动联网询问。
+  "clangd.checkUpdates": false,
+
+  // 关掉 MS C/C++ 插件的 IntelliSense，避免与 clangd 抢符号、重复报错。
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.codeAnalysis.runAutomatically": false,
+
+  // ---------------------------------------------------------------------------
+  // CMake Tools：与 CMakePresets.json 对齐
+  // ---------------------------------------------------------------------------
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+
+  // ---------------------------------------------------------------------------
+  // 编辑
+  // ---------------------------------------------------------------------------
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "[c]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  },
+  "[cpp]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  }
+}

@@ -9,40 +9,34 @@
 ```
 TermCore/
 ├── CMakeLists.txt
+├── CMakePresets.json          # windows-clang / linux-clang / windows-msvc
 ├── cmake/
-│   ├── termcore-config.cmake.in
-│   └── termcore-flags.cmake
+│   ├── TermCoreWarnings.cmake     # 警告集（clang-cl / MSVC 与 GNU 分流）
+│   └── TermCoreDependencies.cmake # GoogleTest 获取策略
 ├── include/termcore/
-│   ├── termcore.h        # 版本、状态、allocator、日志
-│   ├── types.h           # POD：cell / color / style / rect / change / frame_view
-│   ├── term.h            # tc_term_t、事件、sink、source
-│   ├── surface.h         # tc_surface_t、绘制、present
-│   ├── caps.h            # 能力位集与查询
-│   ├── keycodes.h        # TC_KEY_* / TC_MOD_*
-│   └── text.h            # 文本引擎（零依赖，可单独包含）
-├── src/
-│   ├── core/             # term、surface、事件队列、diff
-│   ├── input/            # 解码器、序列状态机、键鼠映射
+│   ├── tc.h              # 总头
+│   ├── tc_export.h       # TC_API 符号可见性
+│   ├── tc_status.h       # 状态码
+│   ├── tc_version.h      # 版本与 ABI
+│   ├── tc_memory.h       # allocator
+│   ├── tc_platform.h     # 平台探测
+│   ├── tc_term.h         # 控制层（docs/02）
+│   ├── tc_caps.h         # 能力层（docs/03）
+│   ├── tc_input.h        # 输入层（docs/04）
+│   ├── tc_text.h         # 文本引擎（docs/05）
+│   └── tc_surface.h      # 渲染层（docs/06）
+├── src/                       # 按层分目录，GLOB 自动收录新增 *.c
+│   ├── common/           # status、version
+│   ├── memory/           # allocator（含测试用计数分配器）
+│   ├── platform/         # 平台后端（win32 / posix）
+│   ├── control/          # 控制层（docs/02）
+│   ├── caps/             # 能力层（docs/03）
+│   ├── input/            # 输入层（docs/04）
 │   ├── text/             # 文本引擎 + 内置 Unicode 表（生成）
-│   ├── caps/             # terminfo / termcap / DA / 环境变量
-│   ├── render/           # 序列生成、outbuf、sink 广播
-│   └── platform/
-│       ├── backend.h
-│       ├── backend_posix.c
-│       ├── backend_win.c
-│       └── backend_null.c
-├── tools/
-│   └── gen_ucd_tables.py     # 从 UCD 生成内置表
-├── tests/
-│   ├── unit/                 # 纯逻辑单测
-│   ├── e2e/                  # headless + 注入输入 + 捕获 sink
-│   └── manual/               # 真机 opt-in
+│   └── render/           # 渲染层（docs/06）
+├── tools/                     # gen_ucd_tables.py（待落地）
+├── tests/                     # GoogleTest，*.cpp
 ├── examples/
-│   ├── events_demo.c
-│   ├── mouse_demo.c
-│   ├── palette_demo.c
-│   ├── scroll_demo.c
-│   └── unicode_width_demo.c
 └── docs/
 ```
 
@@ -50,7 +44,9 @@ TermCore/
 
 | 产物 | 名称 |
 | --- | --- |
-| 静态库 | `libtermcore.a`（GCC / Clang） |
+| 库 | `termcore.lib` / `libtermcore.a`（静态，默认）；`TERMCORE_BUILD_SHARED=ON` 时为动态库 |
+| 测试 | `termcore_test`（GoogleTest，`ctest` 驱动） |
+| 示例 | `termcore_hello`（随层数增加扩展） |
 | ICU 变体 | `libtermcore_icu.a`（可选，后缀区分） |
 | 导出包 | `termcore-config.cmake`、`termcore-targets.cmake` |
 
@@ -59,29 +55,81 @@ TermCore/
 ## 2. CMake 组织
 
 ```cmake
-cmake_minimum_required(VERSION 3.16)
-project(termcore C)
+cmake_minimum_required(VERSION 3.21)
+project(termcore VERSION 0.1.0 LANGUAGES C CXX)
 
-option(TERMCORE_BUILD_TESTS    "构建单元测试与端到端测试" ON)
-option(TERMCORE_BUILD_EXAMPLES "构建示例 demo"            ON)
-option(TERMCORE_USE_ICU        "使用系统 ICU 作为 Unicode 后端" OFF)
-option(TERMCORE_ENABLE_SANITIZERS "开启 ASan/UBSan" OFF)
-option(TERMCORE_WARNINGS_AS_ERRORS "警告视为错误"         ON)
+set(CMAKE_C_STANDARD 11)         # 库：C11
+set(CMAKE_CXX_STANDARD 20)       # 仅测试：C++20（GoogleTest）
+
+option(TERMCORE_BUILD_TESTS    "构建 GoogleTest 测试" ON)
+option(TERMCORE_BUILD_EXAMPLES "构建示例"             ON)
+option(TERMCORE_BUILD_SHARED   "构建动态库"           OFF)
+option(TERMCORE_WERROR         "警告视为错误"         OFF)
 ```
 
 | Target | 内容 |
 | --- | --- |
-| `termcore` | 静态库；`include/` 为 `PUBLIC` 包含目录 |
-| `termcore_tests` | 单测与端到端（自带断言框架，无外部依赖） |
-| `termcore_examples` | demo |
-| `termcore_icu`（可选） | ICU 后端的库变体 |
+| `termcore` | 库（默认静态）；`include/` 为 `PUBLIC` 包含目录 |
+| `termcore_test` | GoogleTest，`tests/*.cpp` 自动 GLOB，`gtest_discover_tests` 注册到 ctest |
+| `termcore_hello` | 最小示例（版本 / 平台 / 分配器） |
+| `termcore_icu`（可选） | ICU 后端的库变体（待落地） |
+
+### 2.1 工具链
+
+| 平台 | 工具链 | 状态 |
+| --- | --- | --- |
+| Windows | `clang` + `clang++`（MSVC target）+ `ninja` + MSVC 的 `link.exe` | 主工具链，已验证 |
+| Windows | `cl` + `ninja`（`windows-msvc` 预设） | 备选，实验 |
+| Linux / WSL | `clang` + `ninja`（`linux-clang` 预设） | 已验证（WSL2 Ubuntu：CMake 4.2 / clang 21 / ninja 1.13） |
+| macOS | — | 无验证环境，暂搁置 |
+
+构建命令：
+
+```bash
+# Windows（PowerShell）
+cmake --preset windows-clang
+cmake --build --preset windows-clang
+ctest --preset windows-clang
+
+# Release
+cmake --preset windows-clang-release
+
+# WSL / Linux（在 WSL 内执行，源码位于 /mnt/d/projects/TermCore）
+cmake --preset linux-clang
+cmake --build --preset linux-clang
+ctest --preset linux-clang
+```
+
+### 2.2 依赖：GoogleTest
+
+`TERMCORE_GTEST_SOURCE` 决定来源（`cmake/TermCoreDependencies.cmake`）：
+
+| 值 | 行为 | 适用 |
+| --- | --- | --- |
+| `AUTO`（默认） | `third_party/googletest` 存在则用之，否则 `FETCH` | 常规开发 |
+| `LOCAL` | `add_subdirectory(third_party/googletest)` | 离线构建（把源码放到该目录，已被 `.gitignore` 忽略） |
+| `FETCH` | `FetchContent` 拉 `v1.17.0`（首次配置需网络，之后走 `build/_deps` 缓存） | 默认路径 |
+| `SYSTEM` | `find_package(GTest REQUIRED)` | vcpkg / 发行版包 |
+
+离线的两种快捷方式：
+
+```bash
+# 1) 复用已有源码，不重新下载
+cmake --preset windows-clang -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=<path-to-googletest-src>
+
+# 2) 用 vcpkg 安装的 gtest
+cmake --preset windows-clang -DTERMCORE_GTEST_SOURCE=SYSTEM \
+      -DCMAKE_TOOLCHAIN_FILE=D:/vcpkg/scripts/buildsystems/vcpkg.cmake
+```
+
+> Windows 上必须让 gtest 与工程使用同一 CRT，依赖模块已强制 `gtest_force_shared_crt=ON`。
 
 编译要求：
 
-- C11（`-std=c11`）
-- **禁用 GNU 扩展**：POSIX 后端需 `_POSIX_C_SOURCE` / `_DEFAULT_SOURCE`，不依赖 `-std=gnu11`
-- 警告：`-Wall -Wextra -Wpedantic`；开启 `WARNINGS_AS_ERRORS`
-- 头文件可被 C++ 编译（CI 中用 `g++` 编译一次公开头做 `extern "C"` 校验）
+- C11（`-std=c11`），**禁用 GNU 扩展**；POSIX 后端需 `_POSIX_C_SOURCE` / `_DEFAULT_SOURCE`
+- 测试为 C++20；库与测试用同一套警告：GNU 系 `-Wall -Wextra -Wpedantic`，MSVC 系 `/W4 /utf-8`；`TERMCORE_WERROR=ON` 追加 `-Werror` / `/WX`
+- 警告只作用于工程目标，第三方（GoogleTest）保留其自身设置
+- 头文件可被 C++ 编译（公开头一律 `extern "C"`；测试用例本身即 C++，天然校验）
 
 ---
 

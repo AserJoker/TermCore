@@ -1,0 +1,25 @@
+# Build outputs
+build/
+out/
+cmake-build-*/
+compile_commands.json
+
+# IDE / editor
+.codebuddy/
+.vs/*
+!.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.user
+*.swp
+
+# Local dependency checkouts (FetchContent lives in build/_deps)
+third_party/googletest/
+
+# OS junk
+.DS_Store
+Thumbs.db

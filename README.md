@@ -8,7 +8,35 @@ TermCore 只提供四类原语：**控制终端、拉取输入事件、绘制单
 编码范式：句柄式对象、options 由库函数默认填充、调用方自写主循环、surface 句柄 + 显式提交一帧。
 库提供机制，不提供策略——widget / 布局 / 组件留给上层。
 
-> **当前阶段：只做设计。** 仓库内是设计文档集，尚无实现代码。实现阶段按 `docs/10-build-and-test.md` 的里程碑推进。
+> **当前阶段：骨架。** 仓库内是设计文档集 + 可构建的工程骨架（`termcore` 库 / `termcore_test` / `termcore_hello`）。
+> 实现阶段按 `docs/10-build-and-test.md` 的里程碑推进：先 `common` / `memory` / `platform`，再逐层填充 `control` → `caps` → `input` → `text` → `render`。
+
+---
+
+## 构建
+
+| 平台 | 工具链 | 预设 |
+| --- | --- | --- |
+| Windows | clang + ninja（MSVC target） | `windows-clang` / `windows-clang-release` |
+| Windows（备选） | cl + ninja | `windows-msvc` |
+| Linux / WSL | clang + ninja | `linux-clang` / `linux-clang-release` |
+| macOS | 无验证环境，暂搁置 | — |
+
+```bash
+# Windows（PowerShell）
+cmake --preset windows-clang
+cmake --build --preset windows-clang
+ctest  --preset windows-clang
+
+# WSL / Linux（在 WSL 内执行）
+cmake --preset linux-clang
+cmake --build --preset linux-clang
+ctest  --preset linux-clang
+```
+
+测试用 GoogleTest，默认经 `FetchContent` 拉取（首次配置需网络，之后缓存在 `build/_deps`）。
+离线可用 `TERMCORE_GTEST_SOURCE=LOCAL`（把源码放到 `third_party/googletest`）或 `SYSTEM`（vcpkg / 系统包），
+也可直接复用已有源码：`-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=<path>`。
 
 ---
 
@@ -46,7 +74,7 @@ TermCore 只提供四类原语：**控制终端、拉取输入事件、绘制单
 ## 最小示例
 
 ```c
-#include <termcore/termcore.h>
+#include <termcore/tc.h>
 
 int main(void) {
     tc_term_options opt;
@@ -114,13 +142,18 @@ done:
 | `docs/09-headless-and-tooling.md` | 离线测试与外部工具集成契约 |
 | `docs/10-build-and-test.md` | CMake 结构、测试策略、demo 清单、验收标准 |
 
-## 构建开关（设计目标）
+## 构建开关
 
 ```
-TERMCORE_BUILD_TESTS    单元测试与端到端测试（默认 ON）
-TERMCORE_BUILD_EXAMPLES demo 程序（默认 ON）
-TERMCORE_USE_ICU        可选链接系统 ICU 作为 Unicode 后端（默认 OFF，用内置生成表）
+TERMCORE_BUILD_TESTS     构建 GoogleTest 测试（默认 ON）
+TERMCORE_BUILD_EXAMPLES  构建示例（默认 ON）
+TERMCORE_BUILD_SHARED    构建动态库（默认 OFF，静态库）
+TERMCORE_WERROR          警告视为错误（默认 OFF）
+TERMCORE_GTEST_SOURCE    GoogleTest 来源：AUTO | LOCAL | FETCH | SYSTEM（默认 AUTO）
+TERMCORE_USE_ICU         可选链接系统 ICU 作为 Unicode 后端（待落地，默认 OFF，用内置生成表）
 ```
+
+当前骨架已实现：`tc_status_*`、`tc_version_*`、`tc_allocator_*`（含测试用计数分配器）、`tc_platform_*`。
 
 ## 非目标
 

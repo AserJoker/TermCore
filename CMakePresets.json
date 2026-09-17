@@ -1,0 +1,86 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "TERMCORE_BUILD_TESTS": "ON",
+        "TERMCORE_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "windows-clang",
+      "inherits": "base",
+      "displayName": "Windows · clang + Ninja (Debug)",
+      "description": "Primary Windows toolchain: clang / clang++ with MSVC target",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-clang-release",
+      "inherits": "windows-clang",
+      "displayName": "Windows · clang + Ninja (Release)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "windows-msvc",
+      "inherits": "base",
+      "displayName": "Windows · cl + Ninja (Debug, experimental)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-clang",
+      "inherits": "base",
+      "displayName": "Linux / WSL · clang + Ninja (Debug)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-clang-release",
+      "inherits": "linux-clang",
+      "displayName": "Linux / WSL · clang + Ninja (Release)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-clang",        "configurePreset": "windows-clang" },
+    { "name": "windows-clang-release","configurePreset": "windows-clang-release" },
+    { "name": "windows-msvc",         "configurePreset": "windows-msvc" },
+    { "name": "linux-clang",          "configurePreset": "linux-clang" },
+    { "name": "linux-clang-release",  "configurePreset": "linux-clang-release" }
+  ],
+  "testPresets": [
+    { "name": "windows-clang", "configurePreset": "windows-clang", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang",   "configurePreset": "linux-clang",   "output": { "outputOnFailure": true } }
+  ]
+}
