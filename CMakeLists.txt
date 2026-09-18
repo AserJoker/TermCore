@@ -27,6 +27,7 @@ option(TERMCORE_BUILD_TESTS    "Build the GoogleTest suite"        ON)
 option(TERMCORE_BUILD_EXAMPLES "Build the examples"                ON)
 option(TERMCORE_BUILD_SHARED   "Build termcore as a shared library" OFF)
 option(TERMCORE_WERROR         "Treat warnings as errors"          OFF)
+option(TERMCORE_USE_ICU        "Build with the ICU text backend"   OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(TermCoreWarnings)
@@ -78,6 +79,19 @@ target_include_directories(termcore PUBLIC
 
 termcore_target_warnings(termcore)
 
+# ---------------------------------------------------------------------------
+# Optional ICU text backend (docs/05 §9). When enabled, third_party/icu is
+# built via FetchContent (offline archives auto-detected from
+# third_party/icu/download/) with the icudt*.dat staged as an EXTERNAL file at
+# ${CMAKE_BINARY_DIR}/data; the application calls icu_data_init(data_dir) once
+# at startup (see third_party/icu/icu_data.h).
+# ---------------------------------------------------------------------------
+if(TERMCORE_USE_ICU)
+  add_subdirectory(third_party/icu)
+  target_link_libraries(termcore PRIVATE ICU::i18n icu_data_init)
+  target_compile_definitions(termcore PRIVATE TERMCORE_USE_ICU)
+endif()
+
 # Platform libraries. POSIX needs nothing extra yet; Windows console APIs are
 # linked lazily by the platform layer as they land.
 if(WIN32)
@@ -106,6 +120,15 @@ if(TERMCORE_BUILD_TESTS)
   add_executable(termcore_test ${TERMCORE_TEST_SOURCES})
   target_link_libraries(termcore_test PRIVATE termcore::termcore ${TERMCORE_GTEST_TARGET})
   termcore_target_warnings(termcore_test)
+
+  # ICU tests need the macro, the staged data directory at runtime, and the
+  # ICU headers (termcore links ICU privately, so nothing propagates).
+  if(TERMCORE_USE_ICU)
+    target_compile_definitions(termcore_test PRIVATE TERMCORE_USE_ICU)
+    target_compile_definitions(termcore_test PRIVATE
+        TC_ICU_DATA_DIR="${ICU_DATA_DIR}")
+    target_link_libraries(termcore_test PRIVATE ICU::i18n icu_data_init)
+  endif()
 
   include(GoogleTest)
   gtest_discover_tests(termcore_test)

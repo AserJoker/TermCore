@@ -19,7 +19,12 @@ compile_commands.json
 
 # Local dependency checkouts (FetchContent lives in build/_deps)
 third_party/googletest/
+# ICU offline archives (re-download or copy from a local cache to build offline)
+third_party/icu/download/
 
 # OS junk
 .DS_Store
 Thumbs.db
+
+# codegraph index cache
+.codegraph/

@@ -13,5 +13,6 @@
 #include <termcore/tc_version.h>
 #include <termcore/tc_memory.h>
 #include <termcore/tc_platform.h>
+#include <termcore/tc_text.h>
 
 #endif /* TERMCORE_TC_H */
