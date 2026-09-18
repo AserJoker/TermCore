@@ -27,7 +27,7 @@ option(TERMCORE_BUILD_TESTS    "Build the GoogleTest suite"        ON)
 option(TERMCORE_BUILD_EXAMPLES "Build the examples"                ON)
 option(TERMCORE_BUILD_SHARED   "Build termcore as a shared library" OFF)
 option(TERMCORE_WERROR         "Treat warnings as errors"          OFF)
-option(TERMCORE_USE_ICU        "Build with the ICU text backend"   OFF)
+option(TERMCORE_USE_ICU        "Build with the ICU text backend"   ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(TermCoreWarnings)

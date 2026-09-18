@@ -284,13 +284,13 @@ bool tc_text_wrap_next(const char* utf8, size_t len, int32_t max_columns,
 
 **架构决策（2026-09）：采用"仅 ICU 后端"**。grapheme 切分与宽度判定以
 ICU 为唯一完整实现；不再维护内置 UCD 生成表工具链（`tools/gen_ucd_tables.*`
-计划已废弃）。`TERMCORE_USE_ICU=ON` 时行为与 ICU 版本对齐；
-`OFF` 时提供**保守降级**，保证 API 可用但不保证完整 UAX#29 语义。
+计划已废弃）。`TERMCORE_USE_ICU` **默认 `ON`**；显式置 `OFF` 时提供
+**保守降级**，保证 API 可用但不保证完整 UAX#29 语义。
 
-### 9.1 ICU 后端（`TERMCORE_USE_ICU=ON`）
+### 9.1 ICU 后端（`TERMCORE_USE_ICU=ON`，默认）
 
 ```cmake
-cmake -DTERMCORE_USE_ICU=ON ...
+cmake -DTERMCORE_USE_ICU=OFF ...   # 显式关闭
 ```
 
 | 功能 | ICU 实现 |
@@ -307,7 +307,7 @@ cmake -DTERMCORE_USE_ICU=ON ...
   加载数据；`gtest_discover_tests` 的每个测试进程需自行初始化
 - 数据文件与库版本必须匹配（ICU 74.x）
 
-### 9.2 无 ICU 降级（`TERMCORE_USE_ICU=OFF`，默认）
+### 9.2 无 ICU 降级（`TERMCORE_USE_ICU=OFF`）
 
 不做 UAX#29 簇合并，行为退化为：
 
