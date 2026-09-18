@@ -28,3 +28,6 @@ Thumbs.db
 
 # codegraph index cache
 .codegraph/
+
+# CodeAgentCLI local settings
+.cac/

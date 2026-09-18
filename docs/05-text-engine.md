@@ -14,7 +14,7 @@
 | 无分配 | 全模块不调用 allocator，可在热路径随意调用 |
 | 纯函数 | 相同输入必得相同输出；不做 locale 推断、不读环境变量 |
 | 双模式 | ASCII 与 Unicode 两套语义，行为差异集中在本文 §3 |
-| 数据自足 | 默认内置生成表（编译进二进制）；可选 ICU 后端，API 不变 |
+| 数据源 | 完整 UAX#29 由可选 ICU 后端提供；无 ICU 时保守降级（§9） |
 
 ---
 
@@ -73,7 +73,7 @@ typedef struct tc_text_metrics {
 | 组合符 | 宽度为 0，并入前一个簇 |
 | emoji ZWJ 序列 | 整个序列算一个簇，宽度 2 |
 | 区域指示符（国旗） | 成对算一个簇，宽度 2 |
-| 无效序列 | 单个非法字节按 U+FFFD 处理，宽度按替换字符计算 |
+| 无效序列 | 单个非法字节按 U+FFFD 处理；流末端的不完整序列整个结算为一个 U+FFFD（见 §4.2） |
 
 ### 3.3 模式选择
 
@@ -115,7 +115,7 @@ size_t      tc_text_utf8_encode(uint32_t cp, char* out4);   /* 返回写入字�
 
 - 解码器**不持有**跨调用状态；状态由调用方（解析器/绘制器）用"残留缓冲"保存
 - `TC_UTF8_INCOMPLETE` 时不推进指针，调用方保留这些字节，等下一批数据后重试
-- 流结束时仍有不完整序列 → 按 `TC_UTF8_INVALID` 结算（产出 U+FFFD）
+- 流结束时仍有不完整序列 → 按 `TC_UTF8_INVALID` 结算：**整个剩余序列**作为一个 U+FFFD 消费（不再逐字节拆开）
 - 残留缓冲有上限（解析器侧 256 字节），超限丢弃并诊断
 
 ---
@@ -160,7 +160,8 @@ bool tc_text_grapheme_next_off(const char* s, size_t len, size_t* inout_offset, 
 const char* s = text; const char* end = text + len;
 tc_grapheme g;
 while (s < end && tc_text_grapheme_next(&s, end, &g)) {
-    /* g.begin..g.end 是一个字符簇，g.width 是它的列宽 */
+    /* g.begin..g.end 是一个字符簇；列宽由 tc_text_grapheme_width(&g, …)
+     * 计算（next 本身不填 g.width，因其签名无模式参数，见 §6.3） */
 }
 ```
 
@@ -279,38 +280,51 @@ bool tc_text_wrap_next(const char* utf8, size_t len, int32_t max_columns,
 
 ---
 
-## 9. Unicode 数据表与可选 ICU
+## 9. Unicode 数据源：仅 ICU 后端（含无 ICU 降级）
 
-### 9.1 默认：内置生成表
+**架构决策（2026-09）：采用"仅 ICU 后端"**。grapheme 切分与宽度判定以
+ICU 为唯一完整实现；不再维护内置 UCD 生成表工具链（`tools/gen_ucd_tables.*`
+计划已废弃）。`TERMCORE_USE_ICU=ON` 时行为与 ICU 版本对齐；
+`OFF` 时提供**保守降级**，保证 API 可用但不保证完整 UAX#29 语义。
 
-| 表 | 用途 | 压缩方式 |
-| --- | --- | --- |
-| `Grapheme_Cluster_Break` 属性 | UAX#29 规则 | 区间表 + 二分；高频区两级索引 |
-| `Extended_Pictographic` | GB11 / emoji 宽度 | 区间表 |
-| `East_Asian_Width`（W/F/A/Na/H/N） | 宽度 | 区间表 |
-| `Emoji_Presentation` | VS16 宽度 | 区间表 |
-| 默认忽略 / 组合符（可由 GCB=Extend + 通用类别推导） | 宽度 0 | 由属性表推导 |
-
-- 构建时由脚本从 UCD（`GraphemeBreakProperty.txt` / `EastAsianWidth.txt` / `emoji-data.txt` / `DerivedCoreProperties.txt`）生成 `.c`，**编译进二进制**
-- 无运行时数据文件、无动态加载路径，部署与离线可用
-- 体积目标：全部表合计控制在 ~100 KB 以内（两级索引 + 差分编码）
-- 表生成脚本纳入仓库（`tools/gen_ucd_tables.*`），生成结果随源码提交（保证无网络也能构建）
-
-### 9.2 可选：ICU 后端
+### 9.1 ICU 后端（`TERMCORE_USE_ICU=ON`）
 
 ```cmake
 cmake -DTERMCORE_USE_ICU=ON ...
 ```
 
-- 启用后 `tc_text_*` 内部改用 ICU（`u_getIntPropertyValue` / `u_strToUTF8` / `ubrk` …）实现**同一套 API**
-- ICU 数据由**系统 ICU** 提供（动态库），不打包 `.dat` 进二进制
-- 优点：跟随系统 Unicode 版本更新；缺点：引入运行时依赖
-- 构建产物用不同后缀区分（如 `libtermcore_icu.a`），避免静默改变依赖
+| 功能 | ICU 实现 |
+| --- | --- |
+| 簇切分 | `ubrk_open(UBRK_CHARACTER, "")` + `ubrk_next`（完整 UAX#29，含 GB11 emoji ZWJ、GB12/13 RI 配对、GB3 CRLF、GB6/7/8 Hangul） |
+| 宽度 | `u_charType`（组合标记 Mn/Me/Mc → 0）+ `u_getIntPropertyValue(UCHAR_EAST_ASIAN_WIDTH)`（W/F → 2，A → 随 `ambiguous_wide`） |
+| emoji 宽度 | `UCHAR_EMOJI_PRESENTATION` / `UCHAR_EXTENDED_PICTOGRAPHIC`（VS16、ZWJ 序列 → 2） |
 
-### 9.3 两者一致性
+数据加载：
 
-- 无论内置还是 ICU，API 与语义必须一致；测试集（§10）在两种构建下都要跑
-- 内置表随库版本升；ICU 后端随系统升，可能出现细微差异 —— 文档明确"内置表为准"作为行为基准
+- ICU 以 **stubdata**（`icudt*.dat` 不嵌入二进制）构建，数据包在运行时外部加载
+- `third_party/icu` 构建后把 `icudt74l.dat` 复制到 `${CMAKE_BINARY_DIR}/data/`
+- 应用启动时调用 `icu_data_init(data_dir)`（见 `third_party/icu/icu_data.h`）
+  加载数据；`gtest_discover_tests` 的每个测试进程需自行初始化
+- 数据文件与库版本必须匹配（ICU 74.x）
+
+### 9.2 无 ICU 降级（`TERMCORE_USE_ICU=OFF`，默认）
+
+不做 UAX#29 簇合并，行为退化为：
+
+| 项目 | 降级行为 |
+| --- | --- |
+| 簇切分 | 按码点切分（一个码点一个簇），CRLF、组合符、ZWJ、RI、Hangul 均不合并 |
+| 宽度 | 内置区间表：CJK/全角/emoji 区间 → 2；组合标记区间表（Mn/Me/Mc 常用块 + 变体选择符）→ 0；EAW Ambiguous 采样区间 → 随 `ambiguous_wide`；其余 → 1 |
+| 组合符 | 不并入基字符簇；`tc_text_grapheme_width` 对纯组合簇仍返回 0 |
+
+降级路径的区间表是**采样**的（覆盖常用块），与 ICU 的完整 UCD 数据可能有差异；
+需要完整语义的构建应启用 ICU。
+
+### 9.3 一致性
+
+- ICU 构建是行为基准；降级构建只保证"合理近似 + 稳定 API"
+- 测试在两种构建下都跑：依赖完整簇合并语义的用例在无 ICU 时跳过（`TC_REQUIRE_ICU()`）
+- ICU 数据由外部 `icudt*.dat` 提供，跟随仓库内固定的 ICU 74.2 源版本
 
 ---
 
@@ -327,7 +341,10 @@ cmake -DTERMCORE_USE_ICU=ON ...
 | 跨块 | 按 1 字节喂入长序列 | 结果与一次性喂入一致 |
 | 测量 / 截断 / 换行 | 混合 CJK + emoji + 组合符的字符串 | 列宽、截断偏移、换行点 |
 | Fuzz | 随机字节流 | 不崩溃、不越界、宽度与非负 |
-| 一致性 | 内置表构建 vs ICU 构建 | 关键用例一致 |
+| 一致性 | ICU 构建 vs 无 ICU 降级构建 | 降级跳过依赖簇合并的用例；其余一致 |
+
+> 依赖完整 UAX#29 簇合并语义的用例（GB3 CRLF、GB6/7/8 Hangul、GB9 组合符、
+> GB11 emoji ZWJ、GB12/13 RI 配对）在无 ICU 构建下跳过（`TC_REQUIRE_ICU()`）。
 
 ---
 
@@ -336,15 +353,16 @@ cmake -DTERMCORE_USE_ICU=ON ...
 | 操作 | 复杂度 | 说明 |
 | --- | --- | --- |
 | 解码 1 码点 | O(1) | 按首字节分支 |
-| 属性查表 | O(log n)（两级索引热点 O(1)） | 区间二分 |
-| 簇切分 | O(簇内码点数) | 通常 1–3 |
-| 宽度 | O(簇内码点数) | 缓存首码点结果可优化 |
+| 宽度判定（ICU） | O(1) | `u_charType` + `u_getIntPropertyValue` 属性查询 |
+| 宽度判定（降级） | O(区间表项数) | 内置区间线性扫描（表较小，可接受） |
+| 簇切分（ICU） | O(簇内码点数) | ubrk 每次调用解码至多 33 码点 + 一次迭代 |
+| 簇切分（降级） | O(1) | 单码点 |
 | 测量整串 | O(n) | 顺序扫描，无分配 |
 
 优化约定：
 
 - 渲染层可缓存"上一次的簇结果"（同一行内连续绘制时常见），但引擎本身无状态
-- 全角/半角判定结果可查小表（BMP 常用区一级索引）
+- ICU 路径每次 `grapheme_next` 新建迭代器；上层若追求极致性能可在热路径复用 `UBreakIterator`（引擎不持有状态，由上层缓存）
 - 热路径无分配、无锁、无 locale 调用
 
 ---
