@@ -10,7 +10,8 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "TERMCORE_BUILD_TESTS": "ON",
-        "TERMCORE_BUILD_EXAMPLES": "ON"
+        "TERMCORE_BUILD_EXAMPLES": "ON",
+        "TERMCORE_USE_ICU": "ON"
       }
     },
     {

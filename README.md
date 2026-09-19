@@ -57,7 +57,7 @@ ctest  --preset linux-clang
 - **ASCII 模式**：严格 7bit。非 ASCII 走替换字符（默认 `?`，可配置 U+FFFD），宽度恒为 1，不走 UTF-8 多字节解码
 - **Unicode 模式**：按 UAX#29 字符簇切分，簇宽度由 East Asian Width 决定（W / F = 2，组合符 = 0），Ambiguous 宽度可配置
 - 全部为**无状态、无分配纯函数**，`tc_present` / `tc_get_event` 热路径上零分配
-- Unicode 数据表默认内置生成（编译进二进制，无运行时数据文件）；可选 ICU 后端（`TERMCORE_USE_ICU=ON`，链接系统 ICU，数据不打包）
+- Unicode 数据表默认内置生成（编译进二进制，无运行时数据文件）；可选 ICU 后端（`TERMCORE_USE_ICU=ON`，默认 ON：由 FetchContent 构建 ICU 静态库，`icudt*.dat` 作为外部文件在运行时从 `build/<preset>/data` 加载）
 
 ## 可测试性与外部工具
 
@@ -150,7 +150,7 @@ TERMCORE_BUILD_EXAMPLES  构建示例（默认 ON）
 TERMCORE_BUILD_SHARED    构建动态库（默认 OFF，静态库）
 TERMCORE_WERROR          警告视为错误（默认 OFF）
 TERMCORE_GTEST_SOURCE    GoogleTest 来源：AUTO | LOCAL | FETCH | SYSTEM（默认 AUTO）
-TERMCORE_USE_ICU         可选链接系统 ICU 作为 Unicode 后端（待落地，默认 OFF，用内置生成表）
+TERMCORE_USE_ICU         ICU 作为 Unicode 后端（默认 ON，FetchContent 构建；置 OFF 用内置生成表）
 ```
 
 当前骨架已实现：`tc_status_*`、`tc_version_*`、`tc_allocator_*`（含测试用计数分配器）、`tc_platform_*`。
