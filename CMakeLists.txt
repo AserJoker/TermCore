@@ -77,6 +77,10 @@ target_include_directories(termcore PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>")
 
+# Internal headers (src/<layer>/*.h) are private: they never ship and are never
+# visible to consumers of the installed target.
+target_include_directories(termcore PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 termcore_target_warnings(termcore)
 
 # ---------------------------------------------------------------------------

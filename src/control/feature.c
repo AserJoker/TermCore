@@ -1,0 +1,190 @@
+#include <control/term_internal.h>
+
+#include <string.h>
+
+/* --------------------------------------------------------------------------
+ * Runtime features (docs/02 §4).
+ *
+ * Every sequence here is a compile-time constant: the restore path must work
+ * from an `atexit` hook and from a crash path, where allocating is not an
+ * option (docs/02 §11).
+ *
+ * Only features that were actually applied are undone, so `leave` never emits
+ * noise bytes for something that never took effect.
+ * ------------------------------------------------------------------------ */
+/* 1049 switches to the alternate buffer and saves the cursor. xterm documents
+ * it as "clearing it first", but that clear is not reliable: the scrollback
+ * survives it and several emulators keep the previous session's leftovers, so
+ * the buffer is erased explicitly once it is active.
+ *
+ * Nothing is ever erased on the way out: 1049l restores the primary buffer and
+ * the saved cursor together, which is what protects the shell prompt below. */
+#define TC_SEQ_ALT_SCREEN_ON  "\x1b[?1049h"
+#define TC_SEQ_ALT_SCREEN_OFF "\x1b[?1049l"
+
+#define TC_SEQ_CURSOR_HIDE "\x1b[?25l"
+#define TC_SEQ_CURSOR_SHOW "\x1b[?25h"
+#define TC_SEQ_CURSOR_HOME "\x1b[H"
+
+#define TC_SEQ_ERASE_SCREEN     "\x1b[2J"   /* ED 2: the visible screen */
+#define TC_SEQ_ERASE_SCROLLBACK "\x1b[3J"   /* ED 3: the scrollback as well */
+#define TC_SEQ_ALT_SCREEN_CLEAR                                                \
+    TC_SEQ_ERASE_SCREEN TC_SEQ_ERASE_SCROLLBACK TC_SEQ_CURSOR_HOME
+
+#define TC_SEQ_MOUSE_CLICK_ON  "\x1b[?1000h\x1b[?1006h\x1b[?1015h"
+#define TC_SEQ_MOUSE_DRAG_ON   "\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1015h"
+#define TC_SEQ_MOUSE_MOTION_ON "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1015h"
+#define TC_SEQ_MOUSE_CLICK_OFF  "\x1b[?1000l\x1b[?1006l\x1b[?1015l"
+#define TC_SEQ_MOUSE_DRAG_OFF   "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?1015l"
+#define TC_SEQ_MOUSE_MOTION_OFF "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l"
+
+#define TC_SEQ_FOCUS_ON        "\x1b[?1004h"
+#define TC_SEQ_FOCUS_OFF       "\x1b[?1004l"
+#define TC_SEQ_PASTE_ON        "\x1b[?2004h"
+#define TC_SEQ_PASTE_OFF       "\x1b[?2004l"
+#define TC_SEQ_KITTY_ON        "\x1b[>1u"
+#define TC_SEQ_KITTY_OFF       "\x1b[<u"
+#define TC_SEQ_SYNC_ON         "\x1b[?2026h"
+#define TC_SEQ_SYNC_OFF        "\x1b[?2026l"
+
+/* DECSCUSR (shape) is not touched: the session only ever hides the cursor with
+ * DECTCEM, so leave() must not overwrite a shape the user chose. A "back to the
+ * terminal default" sequence belongs here only once set_cursor_shape lands. */
+
+static tc_status term_write(tc_term* t, const char* seq) {
+    if (!t || !t->backend) return TC_ERR_STATE;
+    return tc_backend_write(t->backend, seq, strlen(seq), NULL);
+}
+
+static const char* mouse_sequence(tc_mouse_mode mode, bool on) {
+    switch (mode) {
+    case TC_MOUSE_CLICK:  return on ? TC_SEQ_MOUSE_CLICK_ON  : TC_SEQ_MOUSE_CLICK_OFF;
+    case TC_MOUSE_DRAG:   return on ? TC_SEQ_MOUSE_DRAG_ON   : TC_SEQ_MOUSE_DRAG_OFF;
+    case TC_MOUSE_MOTION: return on ? TC_SEQ_MOUSE_MOTION_ON : TC_SEQ_MOUSE_MOTION_OFF;
+    case TC_MOUSE_OFF:    /* fallthrough */
+    default:              return NULL;
+    }
+}
+
+static void term_note(tc_status* first, tc_status st) {
+    if (*first == TC_OK) *first = st;
+}
+
+tc_status tc_term_apply_features(tc_term* t) {
+    tc_status st;
+
+    /* CTRL_C capture has no sequence of its own: it is a property of raw mode
+     * plus the input layer's decoding (docs/02 §9). */
+    t->applied[TC_FEATURE_CAPTURE_CTRL_C] = t->requested[TC_FEATURE_CAPTURE_CTRL_C];
+
+    if (t->requested[TC_FEATURE_RAW_MODE]) {
+        st = tc_backend_set_raw(t->backend, true);
+        if (st != TC_OK) return st;
+        t->applied[TC_FEATURE_RAW_MODE] = true;
+    }
+
+    if (t->requested[TC_FEATURE_ALT_SCREEN]) {
+        st = term_write(t, TC_SEQ_ALT_SCREEN_ON);
+        if (st != TC_OK) return st;
+
+        /* Undoable from here on: if the erase below fails, enter() runs
+         * restore_features() and must be able to switch back (docs/02 §11). */
+        t->applied[TC_FEATURE_ALT_SCREEN] = true;
+
+        st = term_write(t, TC_SEQ_ALT_SCREEN_CLEAR);
+        if (st != TC_OK) return st;
+    }
+
+    if (t->requested[TC_FEATURE_MOUSE] && t->mouse_mode != TC_MOUSE_OFF) {
+        st = term_write(t, mouse_sequence(t->mouse_mode, true));
+        if (st != TC_OK) return st;
+        t->applied[TC_FEATURE_MOUSE] = true;
+        t->applied_mouse_mode        = t->mouse_mode;
+    }
+
+    if (t->requested[TC_FEATURE_FOCUS_EVENTS]) {
+        st = term_write(t, TC_SEQ_FOCUS_ON);
+        if (st != TC_OK) return st;
+        t->applied[TC_FEATURE_FOCUS_EVENTS] = true;
+    }
+
+    if (t->requested[TC_FEATURE_BRACKETED_PASTE]) {
+        st = term_write(t, TC_SEQ_PASTE_ON);
+        if (st != TC_OK) return st;
+        t->applied[TC_FEATURE_BRACKETED_PASTE] = true;
+    }
+
+    if (t->requested[TC_FEATURE_KITTY_KEYBOARD]) {
+        st = term_write(t, TC_SEQ_KITTY_ON);
+        if (st != TC_OK) return st;
+        t->applied[TC_FEATURE_KITTY_KEYBOARD] = true;
+    }
+
+    if (t->requested[TC_FEATURE_SYNC_UPDATE]) {
+        st = term_write(t, TC_SEQ_SYNC_ON);
+        if (st != TC_OK) return st;
+        t->applied[TC_FEATURE_SYNC_UPDATE] = true;
+    }
+
+    if (t->hide_cursor) {
+        st = term_write(t, TC_SEQ_CURSOR_HIDE);
+        if (st != TC_OK) return st;
+        t->cursor_hidden = true;
+    }
+
+    return TC_OK;
+}
+
+/* Reverse order, best effort: every step runs even if an earlier one failed,
+ * and the first error seen is reported (docs/02 §11). */
+tc_status tc_term_restore_features(tc_term* t) {
+    tc_status first = TC_OK;
+
+    if (t->applied[TC_FEATURE_SYNC_UPDATE]) {
+        term_note(&first, term_write(t, TC_SEQ_SYNC_OFF));
+        t->applied[TC_FEATURE_SYNC_UPDATE] = false;
+    }
+
+    if (t->applied[TC_FEATURE_KITTY_KEYBOARD]) {
+        term_note(&first, term_write(t, TC_SEQ_KITTY_OFF));
+        t->applied[TC_FEATURE_KITTY_KEYBOARD] = false;
+    }
+
+    if (t->applied[TC_FEATURE_MOUSE]) {
+        term_note(&first, term_write(t, mouse_sequence(t->applied_mouse_mode, false)));
+        t->applied[TC_FEATURE_MOUSE] = false;
+        t->applied_mouse_mode        = TC_MOUSE_OFF;
+    }
+
+    if (t->applied[TC_FEATURE_FOCUS_EVENTS]) {
+        term_note(&first, term_write(t, TC_SEQ_FOCUS_OFF));
+        t->applied[TC_FEATURE_FOCUS_EVENTS] = false;
+    }
+
+    if (t->applied[TC_FEATURE_BRACKETED_PASTE]) {
+        term_note(&first, term_write(t, TC_SEQ_PASTE_OFF));
+        t->applied[TC_FEATURE_BRACKETED_PASTE] = false;
+    }
+
+    if (t->applied[TC_FEATURE_ALT_SCREEN]) {
+        /* 1049l restores the primary buffer *and* the cursor saved by 1049h, so
+         * no further sequence may touch the screen here — no erase, no cursor
+         * home — or the prompt underneath would not come back untouched. */
+        term_note(&first, term_write(t, TC_SEQ_ALT_SCREEN_OFF));
+        t->applied[TC_FEATURE_ALT_SCREEN] = false;
+    }
+
+    if (t->cursor_hidden) {
+        term_note(&first, term_write(t, TC_SEQ_CURSOR_SHOW));
+        t->cursor_hidden = false;
+    }
+
+    if (t->applied[TC_FEATURE_RAW_MODE]) {
+        term_note(&first, tc_backend_set_raw(t->backend, false));
+        t->applied[TC_FEATURE_RAW_MODE] = false;
+    }
+
+    t->applied[TC_FEATURE_CAPTURE_CTRL_C] = false;
+
+    return first;
+}

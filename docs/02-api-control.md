@@ -216,8 +216,11 @@ tc_status tc_term_enter_alt_screen(tc_term_t* t);
 tc_status tc_term_leave_alt_screen(tc_term_t* t);
 ```
 
-- 进入：写 `ESC [ ? 1049 h`（优先，会同时保存光标）；能力不支持时退化为 `ESC [ ? 47 h`，再不支持则跳过
-- 离开：写 `ESC [ ? 1049 l`；`leave` 中自动执行
+- 进入：写 `ESC [ ? 1049 h`（优先，会同时保存光标），**随后显式清屏** `ESC [ 2 J` `ESC [ 3 J` `ESC [ H`
+  （1049 在 xterm 里被描述为"先清空"，但滚动区不在此列、各模拟器行为也不一致，因此库自己擦一次，
+  保证不会画在上一次会话的残留上）；能力不支持时退化为 `ESC [ ? 47 h`，再不支持则跳过
+- 离开：只写 `ESC [ ? 1049 l`，由它一并恢复主缓冲区与 1049h 保存的光标；`leave` 中自动执行
+- 离开时**不再**写 `ESC [ 2 J` / `ESC [ H` / 光标形状序列：主缓冲区内容与用户原先的光标位置必须原样回来
 - 不支持 altscreen 时返回 `TC_ERR_UNSUPPORTED`，应用仍需正常工作（只是会污染回滚历史）
 - 统一开关入口：`TC_FEATURE_ALT_SCREEN`（见 §4），运行期可进出多次（如临时退回主屏看输出）
 
@@ -244,7 +247,7 @@ tc_status tc_term_set_cursor_pos(tc_term_t* t, int32_t x, int32_t y);  /* 0 基�
 - 形状用 `ESC [ Ps SP q`（DECSCUSR）；不支持时降级为"仅显隐"
 - 位置通常由渲染层在 present 时管理；此 API 供显式控制（如让终端光标跟随焦点控件）
 - 显隐与形状都是**运行时开关**：随时可改（如编辑态用 BAR、浏览态隐藏）
-- `leave` 时强制显示光标并恢复默认形状
+- `leave` 时强制显示光标；形状只在会话确实改过形状时才恢复（未实现 `tc_term_set_cursor_shape` 之前，不动用户选的形状）
 
 ---
 
@@ -302,7 +305,7 @@ tc_status tc_term_set_title(tc_term_t* t, const char* utf8);
 4. 关闭焦点事件（1004）
 5. 关闭括号粘贴（2004）
 6. 退出 alternate screen
-7. 显示光标、恢复默认光标形状、光标移到首行首列（可选）
+7. 显示光标（`ESC [ ? 25 h`；形状未被本库改动，故不写 DECSCUSR，光标位置由 1049l 恢复，不再写 `ESC [ H`）
 8. 恢复 raw/cooked 到原状态（恢复保存的 `termios` / Console mode）
 9. 冲刷 outbuf（尽力）
 
