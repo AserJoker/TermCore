@@ -17,8 +17,12 @@
       "request": "launch",
       "program": "${command:cmake.launchTargetPath}",
       "args": [],
+      "environment": [{
+        "name": "TERMCORE_HELLO_HOLD",
+        "value": "1"
+      }],
       "cwd": "${workspaceFolder}",
-      "externalConsole": true,
+      "console": "externalTerminal",
       "stopAtEntry": false
     },
     {
