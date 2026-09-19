@@ -35,6 +35,25 @@
   "cmake.configureOnOpen": false,
 
   // ---------------------------------------------------------------------------
+  // 终端验证：默认在独立窗口里跑，而不是 VS Code 集成终端
+  // ---------------------------------------------------------------------------
+  // F5 与 CMake Tools 的调试按钮都走这份默认配置（见 launch.json 注释）。
+  "cmake.debugConfig": {
+    "externalConsole": true
+  },
+
+  // externalTerminal 使用的外部终端程序。wt.exe 依赖 App Execution Alias 在
+  // PATH 中（默认开启）；找不到时改成完整路径：
+  //   C:\\Users\\<user>\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe
+  "terminal.external.windowsExec": "wt.exe",
+
+  // externalConsole 窗口的尺寸 VS Code 管不到。若它落在 conhost 上，可用
+  // Windows 控制台默认值把它固定成 80x25（(25<<16)|80 = 0x00190050）：
+  //   reg add HKCU\Console /v WindowSize       /t REG_DWORD /d 0x00190050 /f
+  //   reg add HKCU\Console /v ScreenBufferSize /t REG_DWORD /d 0x00190050 /f
+  // 需要精确控制时请改用 tasks.json 的 "run: hello (Windows Terminal 80x25)"。
+
+  // ---------------------------------------------------------------------------
   // 编辑
   // ---------------------------------------------------------------------------
   "files.trimTrailingWhitespace": true,

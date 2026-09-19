@@ -1,0 +1,35 @@
+{
+  // ---------------------------------------------------------------------------
+  // 调试配置（F5）
+  //
+  // 默认走 externalConsole：调试目标在独立窗口里启动，不经过集成终端的
+  // conpty，因此 raw mode / alt screen / 鼠标等可以按真实终端行为观察。
+  //
+  // 注意：externalConsole 打开的窗口尺寸不在 VS Code 控制范围内——它由
+  // Windows 控制台默认值（或系统默认终端应用）决定；需要精确 80x25 时用
+  // tasks.json 里的 wt.exe 任务（`wt --size 80,25` 是字符单位）。
+  // ---------------------------------------------------------------------------
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "hello · external console (独立窗口)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "externalConsole": true,
+      "stopAtEntry": false
+    },
+    {
+      "name": "hello · integrated terminal (集成终端)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    }
+  ]
+}
