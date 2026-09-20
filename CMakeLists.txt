@@ -123,6 +123,9 @@ if(TERMCORE_BUILD_TESTS)
 
   add_executable(termcore_test ${TERMCORE_TEST_SOURCES})
   target_link_libraries(termcore_test PRIVATE termcore::termcore ${TERMCORE_GTEST_TARGET})
+  # White-box: tests reach the internal control-layer headers (signal module,
+  # live-term registry, feature state machine) that are never installed.
+  target_include_directories(termcore_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   termcore_target_warnings(termcore_test)
 
   # ICU tests need the macro, the staged data directory at runtime, and the

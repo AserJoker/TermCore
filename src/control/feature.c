@@ -136,34 +136,42 @@ tc_status tc_term_apply_features(tc_term* t) {
 }
 
 /* Reverse order, best effort: every step runs even if an earlier one failed,
- * and the first error seen is reported (docs/02 §11). */
-tc_status tc_term_restore_features(tc_term* t) {
+ * and the first error seen is reported (docs/02 §11).
+ *
+ * With writeback=true this is the public leave() path: applied[] / state are
+ * reset so a second leave is a no-op. With writeback=false it is the
+ * async-signal-safe restore (docs/02 §11): the sequences are written and raw
+ * mode is restored, but the state machine is left untouched so a signal that
+ * lands mid-enter() cannot corrupt it (docs/02 §9). */
+static tc_status restore_inner(tc_term* t, bool writeback) {
     tc_status first = TC_OK;
 
     if (t->applied[TC_FEATURE_SYNC_UPDATE]) {
         term_note(&first, term_write(t, TC_SEQ_SYNC_OFF));
-        t->applied[TC_FEATURE_SYNC_UPDATE] = false;
+        if (writeback) t->applied[TC_FEATURE_SYNC_UPDATE] = false;
     }
 
     if (t->applied[TC_FEATURE_KITTY_KEYBOARD]) {
         term_note(&first, term_write(t, TC_SEQ_KITTY_OFF));
-        t->applied[TC_FEATURE_KITTY_KEYBOARD] = false;
+        if (writeback) t->applied[TC_FEATURE_KITTY_KEYBOARD] = false;
     }
 
     if (t->applied[TC_FEATURE_MOUSE]) {
         term_note(&first, term_write(t, mouse_sequence(t->applied_mouse_mode, false)));
-        t->applied[TC_FEATURE_MOUSE] = false;
-        t->applied_mouse_mode        = TC_MOUSE_OFF;
+        if (writeback) {
+            t->applied[TC_FEATURE_MOUSE] = false;
+            t->applied_mouse_mode        = TC_MOUSE_OFF;
+        }
     }
 
     if (t->applied[TC_FEATURE_FOCUS_EVENTS]) {
         term_note(&first, term_write(t, TC_SEQ_FOCUS_OFF));
-        t->applied[TC_FEATURE_FOCUS_EVENTS] = false;
+        if (writeback) t->applied[TC_FEATURE_FOCUS_EVENTS] = false;
     }
 
     if (t->applied[TC_FEATURE_BRACKETED_PASTE]) {
         term_note(&first, term_write(t, TC_SEQ_PASTE_OFF));
-        t->applied[TC_FEATURE_BRACKETED_PASTE] = false;
+        if (writeback) t->applied[TC_FEATURE_BRACKETED_PASTE] = false;
     }
 
     if (t->applied[TC_FEATURE_ALT_SCREEN]) {
@@ -171,20 +179,28 @@ tc_status tc_term_restore_features(tc_term* t) {
          * no further sequence may touch the screen here — no erase, no cursor
          * home — or the prompt underneath would not come back untouched. */
         term_note(&first, term_write(t, TC_SEQ_ALT_SCREEN_OFF));
-        t->applied[TC_FEATURE_ALT_SCREEN] = false;
+        if (writeback) t->applied[TC_FEATURE_ALT_SCREEN] = false;
     }
 
     if (t->cursor_hidden) {
         term_note(&first, term_write(t, TC_SEQ_CURSOR_SHOW));
-        t->cursor_hidden = false;
+        if (writeback) t->cursor_hidden = false;
     }
 
     if (t->applied[TC_FEATURE_RAW_MODE]) {
         term_note(&first, tc_backend_set_raw(t->backend, false));
-        t->applied[TC_FEATURE_RAW_MODE] = false;
+        if (writeback) t->applied[TC_FEATURE_RAW_MODE] = false;
     }
 
-    t->applied[TC_FEATURE_CAPTURE_CTRL_C] = false;
+    if (writeback) t->applied[TC_FEATURE_CAPTURE_CTRL_C] = false;
 
     return first;
+}
+
+tc_status tc_term_restore_features(tc_term* t) {
+    return restore_inner(t, true);
+}
+
+tc_status tc_term_restore_signal(tc_term* t) {
+    return restore_inner(t, false);
 }

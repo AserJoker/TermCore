@@ -1,5 +1,6 @@
 #include <termcore/tc_term.h>
 
+#include <control/signal_internal.h>
 #include <control/term_internal.h>
 #include <platform/backend.h>
 
@@ -17,6 +18,7 @@
  * and the atexit hook can walk it without touching the heap. */
 static tc_term* g_live_terms       = NULL;
 static bool     g_atexit_installed = false;
+static unsigned g_live_count       = 0;   /* first create installs signal hooks, last destroy removes them */
 
 static void tc_term_atexit(void) {
     /* Best effort: no allocation, no error propagation (docs/02 §11). */
@@ -32,8 +34,10 @@ static void term_register(tc_term* t) {
         g_atexit_installed = true;
         atexit(tc_term_atexit);
     }
+    if (g_live_count == 0) (void)tc_signal_install();   /* docs/02 §9 */
     t->next_live   = g_live_terms;
     g_live_terms   = t;
+    g_live_count++;
 }
 
 static void term_unregister(tc_term* t) {
@@ -42,10 +46,21 @@ static void term_unregister(tc_term* t) {
         if (*link == t) {
             *link        = t->next_live;
             t->next_live = NULL;
-            return;
+            break;
         }
         link = &(*link)->next_live;
     }
+    if (g_live_count > 0) g_live_count--;
+    if (g_live_count == 0) tc_signal_uninstall();
+}
+
+/* Read-only walk for the signal module (signal_internal.h). */
+const tc_term* tc_term_live_first(void) {
+    return g_live_terms;
+}
+
+const tc_term* tc_term_live_next(const tc_term* t) {
+    return t ? t->next_live : NULL;
 }
 
 /* --------------------------------------------------------------------------
@@ -206,6 +221,27 @@ tc_status tc_term_leave(tc_term_t* t) {
      * (docs/02 §4.2). */
     t->state = TC_TERM_STATE_CREATED;
     return st;
+}
+
+/* Re-enters a session from normal control flow after a suspend/resume cycle.
+ *
+ * The SIGTSTP handler restores the terminal without touching the state machine
+ * (docs/02 §9): the session is still ACTIVE while the terminal is physically
+ * back to normal. On SIGCONT the application polls tc_signal_take_resume()
+ * and calls this: leave() first clears applied[] (the terminal was already
+ * restored, so the off-sequences are idempotent noise), then enter() re-applies
+ * every requested feature. */
+tc_status tc_term_reenter(tc_term_t* t) {
+    tc_status st;
+
+    if (!t) return TC_ERR_INVALID_ARG;
+    if (t->state == TC_TERM_STATE_DESTROYED) return TC_ERR_STATE;
+
+    if (t->state == TC_TERM_STATE_ACTIVE) {
+        st = tc_term_leave(t);
+        if (st != TC_OK) return st;
+    }
+    return tc_term_enter(t);
 }
 
 void tc_term_destroy(tc_term_t* t) {

@@ -107,6 +107,13 @@ TC_API tc_status tc_term_enter(tc_term_t* t);
  * session that is not active simply returns TC_OK. */
 TC_API tc_status tc_term_leave(tc_term_t* t);
 
+/* Re-enters a session after a suspend/resume cycle (docs/02 §9). The signal
+ * layer restores the terminal on SIGTSTP without touching the session state;
+ * once the application observes the SIGCONT resume flag it calls this to
+ * apply every requested feature again. Safe to call on a session that is not
+ * active (it simply enters). */
+TC_API tc_status tc_term_reenter(tc_term_t* t);
+
 /* Leaves (if needed) and releases the handle. NULL is a no-op. */
 TC_API void tc_term_destroy(tc_term_t* t);
 

@@ -9,6 +9,10 @@
 
 #include <platform/backend.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Runtime features (docs/02 §4). The public setters land with the feature
  * API; until then the control layer owns both the requested and the applied
  * state, because enter()/leave() must agree on what was actually written. */
@@ -72,5 +76,18 @@ struct tc_term {
 /* control/feature.c — apply on enter, undo in reverse on leave. */
 tc_status tc_term_apply_features(tc_term* t);
 tc_status tc_term_restore_features(tc_term* t);
+
+/* Async-signal-safe restore: writes the closing sequences and restores raw
+ * mode, but never mutates state / applied[] (docs/02 §11). The signal module
+ * walks every ACTIVE live term with it. */
+tc_status tc_term_restore_signal(tc_term* t);
+
+/* Read-only walk of the live-term registry (signal module). */
+const tc_term* tc_term_live_first(void);
+const tc_term* tc_term_live_next(const tc_term* t);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* TERMCORE_CONTROL_TERM_INTERNAL_H */
