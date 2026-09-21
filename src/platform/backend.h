@@ -21,6 +21,10 @@
 #include <termcore/tc_platform.h>
 #include <termcore/tc_status.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct tc_backend tc_backend;
 
 typedef struct tc_backend_vtable {
@@ -60,5 +64,9 @@ tc_status tc_backend_write(tc_backend* b, const void* buf, size_t len, size_t* n
 tc_status tc_backend_create_null(const tc_allocator* alloc, tc_backend** out);
 tc_status tc_backend_create_win32(const tc_allocator* alloc, tc_backend** out);
 tc_status tc_backend_create_posix(const tc_allocator* alloc, tc_backend** out);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* TERMCORE_PLATFORM_BACKEND_H */

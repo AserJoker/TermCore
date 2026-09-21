@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <termcore/tc_memory.h>
+#include <termcore/tc_surface.h>
 #include <termcore/tc_term.h>
 
 #include <platform/backend.h>
@@ -71,6 +72,16 @@ struct tc_term {
     int32_t cols_px;
     int32_t rows_px;
     bool    size_forced;   /* tc_term_set_size on the null backend */
+
+    /* render-layer state, owned by term (docs/06 §5). front mirrors the last
+     * successfully presented frame; outbuf is the reusable escape-sequence
+     * scratch buffer. Both are allocated lazily at the first tc_present. */
+    tc_cell* front;
+    int32_t  front_cols;
+    int32_t  front_rows;
+    char*    outbuf;
+    size_t   outbuf_len;
+    size_t   outbuf_cap;
 };
 
 /* control/feature.c — apply on enter, undo in reverse on leave. */

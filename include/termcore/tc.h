@@ -15,5 +15,6 @@
 #include <termcore/tc_platform.h>
 #include <termcore/tc_term.h>
 #include <termcore/tc_text.h>
+#include <termcore/tc_surface.h>
 
 #endif /* TERMCORE_TC_H */

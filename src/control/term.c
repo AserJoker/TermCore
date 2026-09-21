@@ -259,6 +259,19 @@ void tc_term_destroy(tc_term_t* t) {
     }
 
     alloc = t->alloc ? t->alloc : tc_allocator_default();
+
+    /* Render-layer buffers (front mirror + outbuf) are owned by the term and
+     * allocated lazily at the first tc_present (docs/06 §5). */
+    if (t->front) {
+        alloc->free(alloc->ctx, t->front,
+                    (size_t)t->front_cols * (size_t)t->front_rows * sizeof(tc_cell));
+        t->front = NULL;
+    }
+    if (t->outbuf) {
+        alloc->free(alloc->ctx, t->outbuf, t->outbuf_cap);
+        t->outbuf = NULL;
+    }
+
     t->state = TC_TERM_STATE_DESTROYED;
     alloc->free(alloc->ctx, t, sizeof(*t));
 }
