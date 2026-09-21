@@ -126,6 +126,18 @@ static tc_status cap_write(tc_backend* b, const void* buf, size_t len,
     return TC_OK;
 }
 
+static tc_status cap_wait_ready(tc_backend* b, int32_t timeout_ms, bool* ready) {
+    (void)b; (void)timeout_ms;
+    if (ready) *ready = false;
+    return TC_OK;
+}
+
+static tc_status cap_read(tc_backend* b, void* buf, size_t cap, size_t* nread) {
+    (void)b; (void)buf; (void)cap;
+    if (nread) *nread = 0;
+    return TC_OK;
+}
+
 static const tc_backend_vtable kCaptureVtable = {
     cap_dispose,
     cap_set_raw,
@@ -135,6 +147,8 @@ static const tc_backend_vtable kCaptureVtable = {
     cap_set_cursor_pos,
     cap_set_title,
     cap_write,
+    cap_wait_ready,
+    cap_read,
 };
 
 /* Replaces the term's backend with a capture backend and returns it. The

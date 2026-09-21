@@ -2,6 +2,7 @@
 
 #include <control/signal_internal.h>
 #include <control/term_internal.h>
+#include <input/input_internal.h>
 #include <platform/backend.h>
 
 #include <stdlib.h>
@@ -180,8 +181,17 @@ tc_status tc_term_create(const tc_term_options* opt, tc_term_t** out) {
     t->cols = cols;
     t->rows = rows;
 
+    /* Input layer state (docs/04): event queue + parser buffers, all fixed. */
+    st = tc_input_create(t, alloc);
+    if (st != TC_OK) {
+        tc_backend_destroy(t->backend);
+        t->backend = NULL;
+        alloc->free(alloc->ctx, t, sizeof(*t));
+        return st;
+    }
+
     /* TODO(caps): with opt->caps_profile / query_capabilities, probe or adopt
-     * the capability bits here â€” the capability layer (docs/03) owns it. */
+     * the capability bits here âÿÿ the capability layer (docs/03) owns it. */
 
     term_register(t);
 
@@ -203,6 +213,10 @@ tc_status tc_term_enter(tc_term_t* t) {
         (void)tc_term_restore_features(t);
         return st;
     }
+
+    /* Parser residuals and the mouse drag state are stale after a session
+     * transition; the event queue itself survives (docs/04 ?9). */
+    tc_input_reset(t);
 
     t->state = TC_TERM_STATE_ACTIVE;
     return TC_OK;
@@ -252,6 +266,10 @@ void tc_term_destroy(tc_term_t* t) {
     (void)tc_term_leave(t);
 
     term_unregister(t);
+
+    if (t->input) {
+        tc_input_destroy(t);
+    }
 
     if (t->backend) {
         tc_backend_destroy(t->backend);
@@ -343,5 +361,10 @@ tc_status tc_term_set_size(tc_term_t* t, int32_t cols, int32_t rows) {
     t->cols        = cols;
     t->rows        = rows;
     t->size_forced = true;
+
+    /* Headless resizes have no SIGWINCH; flag the change so the next pull
+     * generates a TC_EV_RESIZE (docs/04 ?12). */
+    (void)tc_signal_note_resize();
+
     return TC_OK;
 }

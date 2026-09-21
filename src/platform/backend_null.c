@@ -65,6 +65,23 @@ static tc_status null_write(tc_backend* b, const void* buf, size_t len, size_t* 
     return TC_OK;
 }
 
+/* The null backend owns no input source: wait never fires and read reports
+ * "nothing" so the greedy loop in the input layer stops immediately. */
+static tc_status null_wait_ready(tc_backend* b, int32_t timeout_ms, bool* ready) {
+    (void)b;
+    (void)timeout_ms;
+    if (ready) *ready = false;
+    return TC_OK;
+}
+
+static tc_status null_read(tc_backend* b, void* buf, size_t cap, size_t* nread) {
+    (void)b;
+    (void)buf;
+    (void)cap;
+    if (nread) *nread = 0;
+    return TC_OK;
+}
+
 static const tc_backend_vtable g_null_vtable = {
     null_dispose,
     null_set_raw,
@@ -73,7 +90,9 @@ static const tc_backend_vtable g_null_vtable = {
     null_set_cursor_visible,
     null_set_cursor_pos,
     null_set_title,
-    null_write
+    null_write,
+    null_wait_ready,
+    null_read
 };
 
 tc_status tc_backend_create_null(const tc_allocator* alloc, tc_backend** out) {

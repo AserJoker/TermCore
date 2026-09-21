@@ -14,6 +14,7 @@
 #include <termcore/tc_memory.h>
 #include <termcore/tc_platform.h>
 #include <termcore/tc_term.h>
+#include <termcore/tc_input.h>
 #include <termcore/tc_text.h>
 #include <termcore/tc_surface.h>
 

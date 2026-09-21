@@ -37,6 +37,12 @@ typedef struct tc_backend_vtable {
     tc_status (*set_title)(tc_backend* b, const char* utf8);
     /* Partial writes are the backend's job: loop until everything is out. */
     tc_status (*write)(tc_backend* b, const void* buf, size_t len, size_t* nwritten);
+    /* Input side (docs/04 §4.4): the input layer pulls bytes through these.
+     * wait_ready parks on the OS (poll / WaitForSingleObject), never busy-waits,
+     * and returns TC_OK + ready=false on timeout. read is non-blocking: nread=0
+     * means "nothing more right now", which is how the greedy loop stops. */
+    tc_status (*wait_ready)(tc_backend* b, int32_t timeout_ms, bool* ready);
+    tc_status (*read)(tc_backend* b, void* buf, size_t cap, size_t* nread);
 } tc_backend_vtable;
 
 struct tc_backend {
@@ -58,6 +64,8 @@ tc_status tc_backend_set_cursor_visible(tc_backend* b, bool visible);
 tc_status tc_backend_set_cursor_pos(tc_backend* b, int32_t x, int32_t y);
 tc_status tc_backend_set_title(tc_backend* b, const char* utf8);
 tc_status tc_backend_write(tc_backend* b, const void* buf, size_t len, size_t* nwritten);
+tc_status tc_backend_wait_ready(tc_backend* b, int32_t timeout_ms, bool* ready);
+tc_status tc_backend_read(tc_backend* b, void* buf, size_t cap, size_t* nread);
 
 /* One factory per backend. Each returns TC_ERR_UNSUPPORTED when compiled for
  * another platform, so the dispatcher above needs no #ifdef. */

@@ -57,3 +57,15 @@ tc_status tc_backend_write(tc_backend* b, const void* buf, size_t len, size_t* n
     if (!b || !b->vt || !b->vt->write) return TC_ERR_UNSUPPORTED;
     return b->vt->write(b, buf, len, nwritten);
 }
+
+tc_status tc_backend_wait_ready(tc_backend* b, int32_t timeout_ms, bool* ready) {
+    if (ready) *ready = false;
+    if (!b || !b->vt || !b->vt->wait_ready) return TC_ERR_UNSUPPORTED;
+    return b->vt->wait_ready(b, timeout_ms, ready);
+}
+
+tc_status tc_backend_read(tc_backend* b, void* buf, size_t cap, size_t* nread) {
+    if (nread) *nread = 0;
+    if (!b || !b->vt || !b->vt->read) return TC_ERR_UNSUPPORTED;
+    return b->vt->read(b, buf, cap, nread);
+}

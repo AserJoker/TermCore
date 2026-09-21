@@ -26,6 +26,7 @@ tc_status tc_backend_create_posix(const tc_allocator* alloc, tc_backend** out) {
 #include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -196,6 +197,62 @@ static tc_status posix_write(tc_backend* b, const void* buf, size_t len, size_t*
     return TC_OK;
 }
 
+/* Parks on the kernel until input arrives or the timeout elapses (docs/04
+ * §4.4): never a busy loop, never a sleep. */
+static tc_status posix_wait_ready(tc_backend* b, int32_t timeout_ms, bool* ready) {
+    posix_backend* p = (posix_backend*)b;
+    struct pollfd  pfd;
+    int            ms;
+    int            rc;
+
+    if (ready) *ready = false;
+
+    pfd.fd     = p->in_fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    ms          = timeout_ms < 0 ? -1 : timeout_ms;
+
+    do {
+        rc = poll(&pfd, 1, ms);
+    } while (rc < 0 && errno == EINTR);
+
+    if (rc < 0) return TC_ERR_IO;
+    if (rc == 0) return TC_OK;                 /* timeout: ready stays false */
+    if (ready) *ready = (pfd.revents & POLLIN) != 0;
+    return TC_OK;
+}
+
+/* Non-blocking read: poll(0) first, so a blocking read never parks. nread=0
+ * means "nothing right now", which terminates the greedy loop. */
+static tc_status posix_read(tc_backend* b, void* buf, size_t cap, size_t* nread) {
+    posix_backend* p = (posix_backend*)b;
+    struct pollfd  pfd;
+    ssize_t        n;
+
+    if (nread) *nread = 0;
+    if (cap == 0) return TC_OK;
+
+    pfd.fd      = p->in_fd;
+    pfd.events  = POLLIN;
+    pfd.revents = 0;
+
+    do {
+        n = poll(&pfd, 1, 0);
+    } while (n < 0 && errno == EINTR);
+
+    if (n <= 0 || !(pfd.revents & POLLIN)) return TC_OK;   /* no data */
+
+    n = read(p->in_fd, buf, cap);
+    if (n < 0) {
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+            return TC_OK;
+        return TC_ERR_IO;
+    }
+
+    if (nread) *nread = (size_t)n;
+    return TC_OK;
+}
+
 static const tc_backend_vtable g_posix_vtable = {
     posix_dispose,
     posix_set_raw,
@@ -204,7 +261,9 @@ static const tc_backend_vtable g_posix_vtable = {
     posix_set_cursor_visible,
     posix_set_cursor_pos,
     posix_set_title,
-    posix_write
+    posix_write,
+    posix_wait_ready,
+    posix_read
 };
 
 tc_status tc_backend_create_posix(const tc_allocator* alloc, tc_backend** out) {

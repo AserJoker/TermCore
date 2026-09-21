@@ -155,6 +155,47 @@ static tc_status win32_write(tc_backend* b, const void* buf, size_t len, size_t*
     return TC_OK;
 }
 
+/* The console input handle is waitable; park the caller until input arrives
+ * or the timeout elapses (docs/04 §4.4). No busy loop. */
+static tc_status win32_wait_ready(tc_backend* b, int32_t timeout_ms, bool* ready) {
+    win32_backend* w = (win32_backend*)b;
+    DWORD          ms;
+    DWORD          rc;
+
+    if (ready) *ready = false;
+    if (!w->saved_in_valid) return TC_OK;   /* no console input */
+
+    ms = timeout_ms < 0 ? INFINITE : (DWORD)timeout_ms;
+    rc = WaitForSingleObject(w->in, ms);
+    if (rc == WAIT_OBJECT_0) {
+        if (ready) *ready = true;
+        return TC_OK;
+    }
+    if (rc == WAIT_TIMEOUT) return TC_OK;   /* ready stays false */
+    return TC_ERR_IO;
+}
+
+/* Non-blocking read: probe the handle first so ReadFile never parks. nread=0
+ * means "nothing right now", which terminates the greedy loop. */
+static tc_status win32_read(tc_backend* b, void* buf, size_t cap, size_t* nread) {
+    win32_backend* w = (win32_backend*)b;
+    DWORD          n = 0;
+
+    if (nread) *nread = 0;
+    if (!w->saved_in_valid || cap == 0) return TC_OK;
+
+    if (WaitForSingleObject(w->in, 0) != WAIT_OBJECT_0) return TC_OK;
+
+    if (cap > 0xFFFF) cap = 0xFFFF;
+    if (!ReadFile(w->in, buf, (DWORD)cap, &n, NULL)) {
+        if (GetLastError() == ERROR_NO_DATA) return TC_OK;   /* raced */
+        return TC_ERR_IO;
+    }
+
+    if (nread) *nread = (size_t)n;
+    return TC_OK;
+}
+
 static const tc_backend_vtable g_win32_vtable = {
     win32_dispose,
     win32_set_raw,
@@ -163,7 +204,9 @@ static const tc_backend_vtable g_win32_vtable = {
     win32_set_cursor_visible,
     win32_set_cursor_pos,
     win32_set_title,
-    win32_write
+    win32_write,
+    win32_wait_ready,
+    win32_read
 };
 
 tc_status tc_backend_create_win32(const tc_allocator* alloc, tc_backend** out) {

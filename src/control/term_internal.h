@@ -21,6 +21,8 @@ extern "C" {
  * sources readable. */
 typedef struct tc_term tc_term;
 
+struct tc_input;   /* input layer (docs/04); completed in input/input_internal.h */
+
 typedef enum tc_feature {
     TC_FEATURE_RAW_MODE = 0,
     TC_FEATURE_ALT_SCREEN,
@@ -72,6 +74,10 @@ struct tc_term {
     int32_t cols_px;
     int32_t rows_px;
     bool    size_forced;   /* tc_term_set_size on the null backend */
+
+    /* Input layer state (docs/04): event queue, parser, injection buffers.
+     * Allocated in create, freed in destroy, zero allocation at runtime. */
+    struct tc_input* input;
 
     /* render-layer state, owned by term (docs/06 §5). front mirrors the last
      * successfully presented frame; outbuf is the reusable escape-sequence
