@@ -25,6 +25,7 @@ tc_status tc_backend_create_posix(const tc_allocator* alloc, tc_backend** out) {
 
 #include <errno.h>
 #include <fcntl.h>
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,6 +214,12 @@ tc_status tc_backend_create_posix(const tc_allocator* alloc, tc_backend** out) {
     if (!out) return TC_ERR_INVALID_ARG;
     *out = NULL;
     if (!alloc) alloc = tc_allocator_default();
+
+    /* Adopt the environment locale (docs/08 §2.7): the library emits UTF-8,
+     * and libc multibyte helpers behave as "C" otherwise, which breaks the
+     * width decisions made outside the pure text engine. Best effort: a
+     * missing locale leaves the previous setting in place. */
+    (void)setlocale(LC_ALL, "");
 
     p = (posix_backend*)alloc->alloc(alloc->ctx, sizeof(*p), sizeof(void*));
     if (!p) return TC_ERR_NOMEM;

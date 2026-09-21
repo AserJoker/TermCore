@@ -39,6 +39,10 @@ typedef struct win32_backend {
     bool       saved_in_valid;
     bool       saved_out_valid;
     bool       raw;
+    UINT       saved_out_cp;   /* console code pages, UTF-8 during the session */
+    UINT       saved_in_cp;
+    bool       out_cp_valid;
+    bool       in_cp_valid;
 } win32_backend;
 
 static void win32_dispose(tc_backend* b) {
@@ -46,6 +50,8 @@ static void win32_dispose(tc_backend* b) {
 
     if (w->raw) (void)b->vt->set_raw(b, false);
     if (w->saved_out_valid) (void)SetConsoleMode(w->out, w->saved_out);
+    if (w->out_cp_valid) (void)SetConsoleOutputCP(w->saved_out_cp);
+    if (w->in_cp_valid) (void)SetConsoleCP(w->saved_in_cp);
 }
 
 static tc_status win32_set_raw(tc_backend* b, bool on) {
@@ -189,6 +195,18 @@ tc_status tc_backend_create_win32(const tc_allocator* alloc, tc_backend** out) {
         (void)SetConsoleMode(w->out,
                              w->saved_out | (DWORD)(ENABLE_PROCESSED_OUTPUT |
                                                     ENABLE_VIRTUAL_TERMINAL_PROCESSING));
+    }
+
+    /* The library speaks UTF-8 (docs/08 §2.7): switch the console code pages
+     * so the bytes we emit (and later read back) round-trip. The originals are
+     * restored on dispose, like the console modes above. */
+    if (w->saved_out_valid) {
+        w->saved_out_cp = GetConsoleOutputCP();
+        w->out_cp_valid = SetConsoleOutputCP(CP_UTF8) != 0;
+    }
+    if (w->saved_in_valid) {
+        w->saved_in_cp = GetConsoleCP();
+        w->in_cp_valid = SetConsoleCP(CP_UTF8) != 0;
     }
 
     *out = &w->base;
