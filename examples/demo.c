@@ -1,8 +1,9 @@
-/* Smoke example: version, platform probe, allocator round-trip and a full
- * terminal session (docs/02 §2, §3).
+/* Combined demo: version, platform probe, allocator round-trip and a full
+ * terminal session (docs/02 §2, §3). Later layers (caps / input / render)
+ * get their own sections here as they land (docs/10 §5).
  *
  * Build: cmake --preset windows-clang && cmake --build --preset windows-clang
- * Run:   build/windows-clang/bin/termcore_hello
+ * Run:   build/windows-clang/bin/termcore_demo
  *
  * The session part runs on a real terminal when stdout is one; otherwise it
  * falls back to headless, which is exactly the path CI and pipes take.
@@ -19,11 +20,11 @@
 
 #include <termcore/tc.h>
 
-/* TERMCORE_HELLO_HOLD=1 keeps a real session active until 'q' is pressed, so
+/* TERMCORE_DEMO_HOLD=1 keeps a real session active until 'q' is pressed, so
  * the alt screen, mouse reporting and hidden cursor can be inspected in an
  * external window. Headless sessions (and therefore CI) never wait. */
 static bool hold_requested(void) {
-    const char* v = getenv("TERMCORE_HELLO_HOLD");
+    const char* v = getenv("TERMCORE_DEMO_HOLD");
     return v != NULL && v[0] != '\0' && v[0] != '0';
 }
 

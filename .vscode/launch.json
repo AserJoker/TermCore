@@ -12,13 +12,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "hello · external console (独立窗口)",
+      "name": "demo · external console (独立窗口)",
       "type": "cppvsdbg",
       "request": "launch",
       "program": "${command:cmake.launchTargetPath}",
       "args": [],
       "environment": [{
-        "name": "TERMCORE_HELLO_HOLD",
+        "name": "TERMCORE_DEMO_HOLD",
         "value": "1"
       }],
       "cwd": "${workspaceFolder}",
@@ -26,7 +26,7 @@
       "stopAtEntry": false
     },
     {
-      "name": "hello · integrated terminal (集成终端)",
+      "name": "demo · integrated terminal (集成终端)",
       "type": "cppvsdbg",
       "request": "launch",
       "program": "${command:cmake.launchTargetPath}",

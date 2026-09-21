@@ -6,7 +6,7 @@
   // VS Code 自己的 ANSI 解析器，alt screen、鼠标、Kitty 键盘协议与同步更新的
   // 表现和真实终端并不完全一致。
   //
-  //   * 肉眼验证真实终端 -> "run: hello (Windows Terminal 80x25)"
+  //   * 肉眼验证真实终端 -> "run: demo (Windows Terminal 80x25)"
   //     (Terminal > Run Task / Ctrl+Shift+B)，由 wt.exe 弹出独立 80x25 窗口；
   //   * 断点调试         -> F5，launch.json 用 externalConsole 走独立窗口。
   //
@@ -22,34 +22,34 @@
       "problemMatcher": []
     },
     {
-      "label": "build: hello",
+      "label": "build: demo",
       "type": "cmake",
       "command": "build",
-      "targets": ["termcore_hello"],
+      "targets": ["termcore_demo"],
       "preset": "${command:cmake.activeConfigurePresetName}",
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": [],
       "dependsOn": ["CMake: configure"]
     },
     {
-      "label": "run: hello (Windows Terminal 80x25)",
+      "label": "run: demo (Windows Terminal 80x25)",
       "type": "process",
       "command": "${env:LOCALAPPDATA}\\Microsoft\\WindowsApps\\wt.exe",
       // wt 全局选项：--size 列,行（字符数）、--pos x,y（像素）。
       //   想每次强制开新窗口而不是复用最近窗口，追加 "-w", "new"。
       // cmd /k + pause 让窗口在程序退出后停住，便于看输出。
-      // TERMCORE_HELLO_HOLD=1 让示例在 alt screen 里等一次按键再 leave。
+      // TERMCORE_DEMO_HOLD=1 让示例在 alt screen 里等一次按键再 leave。
       "args": [
         "--size", "80,25",
         "--pos", "200,200",
-        "--title", "TermCore hello",
+        "--title", "TermCore demo",
         "-d", "${workspaceFolder}",
         "cmd", "/k",
-        "set TERMCORE_HELLO_HOLD=1 && \"${workspaceFolder}\\build\\windows-clang\\bin\\termcore_hello.exe\" & echo [exit=%ERRORLEVEL%] & pause"
+        "set TERMCORE_DEMO_HOLD=1 && \"${workspaceFolder}\\build\\windows-clang\\bin\\termcore_demo.exe\" & echo [exit=%ERRORLEVEL%] & pause"
       ],
       // 切换 windows-clang-release / windows-msvc 预设时改上面那个路径。
       "options": { "cwd": "${workspaceFolder}" },
-      "dependsOn": ["build: hello"],
+      "dependsOn": ["build: demo"],
       "presentation": { "reveal": "silent", "focus": false, "panel": "shared" },
       "problemMatcher": []
     }

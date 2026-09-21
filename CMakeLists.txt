@@ -106,9 +106,9 @@ endif()
 # Examples
 # ---------------------------------------------------------------------------
 if(TERMCORE_BUILD_EXAMPLES)
-  add_executable(termcore_hello examples/hello.c)
-  target_link_libraries(termcore_hello PRIVATE termcore::termcore)
-  termcore_target_warnings(termcore_hello)
+  add_executable(termcore_demo examples/demo.c)
+  target_link_libraries(termcore_demo PRIVATE termcore::termcore)
+  termcore_target_warnings(termcore_demo)
 endif()
 
 # ---------------------------------------------------------------------------

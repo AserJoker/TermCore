@@ -8,7 +8,7 @@ TermCore 只提供四类原语：**控制终端、拉取输入事件、绘制单
 编码范式：句柄式对象、options 由库函数默认填充、调用方自写主循环、surface 句柄 + 显式提交一帧。
 库提供机制，不提供策略——widget / 布局 / 组件留给上层。
 
-> **当前阶段：骨架。** 仓库内是设计文档集 + 可构建的工程骨架（`termcore` 库 / `termcore_test` / `termcore_hello`）。
+> **当前阶段：骨架。** 仓库内是设计文档集 + 可构建的工程骨架（`termcore` 库 / `termcore_test` / `termcore_demo`）。
 > 实现阶段按 `docs/10-build-and-test.md` 的里程碑推进：先 `common` / `memory` / `platform`，再逐层填充 `control` → `caps` → `input` → `text` → `render`。
 
 ---

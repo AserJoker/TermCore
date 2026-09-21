@@ -51,7 +51,7 @@
   // Windows 控制台默认值把它固定成 80x25（(25<<16)|80 = 0x00190050）：
   //   reg add HKCU\Console /v WindowSize       /t REG_DWORD /d 0x00190050 /f
   //   reg add HKCU\Console /v ScreenBufferSize /t REG_DWORD /d 0x00190050 /f
-  // 需要精确控制时请改用 tasks.json 的 "run: hello (Windows Terminal 80x25)"。
+  // 需要精确控制时请改用 tasks.json 的 "run: demo (Windows Terminal 80x25)"。
 
   // ---------------------------------------------------------------------------
   // 编辑

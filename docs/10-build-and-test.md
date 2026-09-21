@@ -46,7 +46,7 @@ TermCore/
 | --- | --- |
 | 库 | `termcore.lib` / `libtermcore.a`（静态，默认）；`TERMCORE_BUILD_SHARED=ON` 时为动态库 |
 | 测试 | `termcore_test`（GoogleTest，`ctest` 驱动） |
-| 示例 | `termcore_hello`（随层数增加扩展） |
+| 示例 | `termcore_demo`（随层数增加扩展） |
 | ICU 变体 | `libtermcore_icu.a`（可选，后缀区分） |
 | 导出包 | `termcore-config.cmake`、`termcore-targets.cmake` |
 
@@ -71,7 +71,7 @@ option(TERMCORE_WERROR         "警告视为错误"         OFF)
 | --- | --- |
 | `termcore` | 库（默认静态）；`include/` 为 `PUBLIC` 包含目录 |
 | `termcore_test` | GoogleTest，`tests/*.cpp` 自动 GLOB，`gtest_discover_tests` 注册到 ctest |
-| `termcore_hello` | 最小示例（版本 / 平台 / 分配器） |
+| `termcore_demo` | 组合样例（版本 / 平台 / 分配器 / 终端会话 / 文本引擎，随层落地扩展） |
 | `termcore_icu`（可选） | ICU 后端的库变体（待落地） |
 
 ### 2.1 工具链
