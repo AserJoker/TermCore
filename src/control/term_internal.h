@@ -89,6 +89,19 @@ struct tc_term {
 tc_status tc_term_apply_features(tc_term* t);
 tc_status tc_term_restore_features(tc_term* t);
 
+/* Reconciles the applied feature state with a (possibly changed) capability
+ * conclusion (docs/03 §10.2): for every requested feature the caps no longer
+ * allow, the on-sequence is undone; for one that is now allowed, it is applied
+ * ("该开的补写 on，该关的补写 off"). The mouse mode is degraded through the
+ * caps chain. No-op outside ACTIVE state. Called by the capability layer after
+ * an override / bits / profile write. */
+tc_status tc_term_replay_features(tc_term* t);
+
+/* runtime.c — apply / undo one feature on an ACTIVE session (docs/02 §4.2).
+ * Shared by set_feature and the caps replay. */
+tc_status tc_feature_apply_one(tc_term* t, tc_feature f);
+tc_status tc_feature_undo_one(tc_term* t, tc_feature f);
+
 /* Async-signal-safe restore: writes the closing sequences and restores raw
  * mode, but never mutates state / applied[] (docs/02 §11). The signal module
  * walks every ACTIVE live term with it. */

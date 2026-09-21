@@ -11,7 +11,48 @@
 
 #include <control/term_internal.h>
 
+#include <cstdlib>
+#include <string>
+
 namespace {
+
+/* Sets / restores an environment variable for the lifetime of the object. */
+class ScopedEnv {
+public:
+    ScopedEnv(const char* name, const char* value) : name_(name) {
+        const char* old = std::getenv(name);
+        had_old_        = (old != nullptr);
+        if (had_old_) old_ = old;
+        set(name, value);
+    }
+    ~ScopedEnv() {
+        if (had_old_) {
+            set(name_.c_str(), old_.c_str());
+        } else {
+            unset(name_.c_str());
+        }
+    }
+
+private:
+    static void set(const char* n, const char* v) {
+#ifdef _WIN32
+        _putenv_s(n, v);
+#else
+        setenv(n, v, 1);
+#endif
+    }
+    static void unset(const char* n) {
+#ifdef _WIN32
+        _putenv_s(n, "");
+#else
+        unsetenv(n);
+#endif
+    }
+
+    std::string name_;
+    std::string old_;
+    bool        had_old_ = false;
+};
 
 tc_term_options headless_options(const tc_allocator* alloc = nullptr) {
     tc_term_options opt;
@@ -121,15 +162,24 @@ TEST(RuntimeFeature, RequestedStateSurvivesLeave) {
 }
 
 TEST(RuntimeFeature, GetFeatureReportsRequestedAndEffective) {
+    /* TERMCORE_CAPS = FOCUS_EVENTS (1 << 20): a deterministic conclusion no
+     * matter what the ambient shell exports. */
+    ScopedEnv caps_env("TERMCORE_CAPS", "0x100000");
     tc_term_t* t = make_term();
-    tc_term*   m = reinterpret_cast<tc_term*>(t);
 
     bool req = false;
     bool eff = true;
     ASSERT_EQ(tc_term_set_feature(t, TC_FEATURE_FOCUS_EVENTS, true), TC_OK);
     ASSERT_EQ(tc_term_get_feature(t, TC_FEATURE_FOCUS_EVENTS, &req, &eff), TC_OK);
     EXPECT_TRUE(req);
-    EXPECT_TRUE(eff);   /* effective == requested until caps land (docs/03) */
+    /* effective = requested && caps allow (docs/02 §4, docs/03 §10.2). */
+    EXPECT_TRUE(eff);
+
+    /* A request the caps reject stays requested but is not effective. */
+    ASSERT_EQ(tc_term_set_feature(t, TC_FEATURE_KITTY_KEYBOARD, true), TC_OK);
+    ASSERT_EQ(tc_term_get_feature(t, TC_FEATURE_KITTY_KEYBOARD, &req, &eff), TC_OK);
+    EXPECT_TRUE(req);
+    EXPECT_FALSE(eff);
 
     /* Either out pointer may be NULL. */
     EXPECT_EQ(tc_term_get_feature(t, TC_FEATURE_FOCUS_EVENTS, &req, nullptr), TC_OK);
@@ -141,7 +191,6 @@ TEST(RuntimeFeature, GetFeatureReportsRequestedAndEffective) {
 
 TEST(RuntimeFeature, RejectsBadFeatureArgument) {
     tc_term_t* t = make_term();
-    tc_term*   m = reinterpret_cast<tc_term*>(t);
 
     EXPECT_EQ(tc_term_set_feature(t, (tc_feature)-1, true), TC_ERR_INVALID_ARG);
     EXPECT_EQ(tc_term_set_feature(t, (tc_feature)TC_FEATURE_COUNT, true), TC_ERR_INVALID_ARG);

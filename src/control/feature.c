@@ -1,5 +1,7 @@
 #include <control/term_internal.h>
 
+#include <caps/caps_internal.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -187,4 +189,62 @@ tc_status tc_term_restore_features(tc_term* t) {
 
 tc_status tc_term_restore_signal(tc_term* t) {
     return restore_inner(t, false);
+}
+
+/* Reconciles the applied feature state with the current capability conclusion
+ * (docs/03 §10.2): after a caps write, every requested protocol bit whose caps
+ * standing changed is replayed — "该开的补写 on，该关的补写 off". The mouse
+ * mode is degraded through the caps chain (docs/03 §7), so a request that
+ * exceeds the terminal's support is re-stated at the effective mode.
+ *
+ * Only the ACTIVE session is touched: in CREATED state nothing is applied yet
+ * and the next enter() picks up the new conclusion. Best effort: the first
+ * failure is reported but every step still runs. */
+tc_status tc_term_replay_features(tc_term* t) {
+    const tc_caps* caps;
+    tc_status      first = TC_OK;
+    int            i;
+
+    if (!t) return TC_ERR_INVALID_ARG;
+    if (t->state != TC_TERM_STATE_ACTIVE) return TC_OK;
+    caps = t->caps ? &t->caps->caps : NULL;
+
+    /* Generic features: reconcile applied[] with (requested && caps-allowed).
+     * RAW_MODE / CAPTURE_CTRL_C are never gated, so they stay untouched. */
+    for (i = 0; i < TC_FEATURE_COUNT; i++) {
+        tc_feature f = (tc_feature)i;
+        bool       allow;
+
+        if (f == TC_FEATURE_MOUSE) continue;   /* mode degradation below */
+        if (!t->requested[i]) continue;
+
+        allow = tc_caps_allows_feature(caps, f);
+        if (allow && !t->applied[i]) {
+            term_note(&first, tc_feature_apply_one(t, f));
+        } else if (!allow && t->applied[i]) {
+            term_note(&first, tc_feature_undo_one(t, f));
+        }
+    }
+
+    /* Mouse: restate at the effective (degraded) mode. */
+    if (t->requested[TC_FEATURE_MOUSE]) {
+        tc_mouse_mode eff = tc_caps_effective_mouse(caps, t->mouse_mode);
+
+        if (eff == TC_MOUSE_OFF) {
+            if (t->applied[TC_FEATURE_MOUSE])
+                term_note(&first, tc_feature_undo_one(t, TC_FEATURE_MOUSE));
+        } else if (!t->applied[TC_FEATURE_MOUSE] || t->applied_mouse_mode != eff) {
+            if (t->applied[TC_FEATURE_MOUSE]) {
+                const char* off = tc_mouse_sequence(t->applied_mouse_mode, false);
+                if (off) term_note(&first, term_write(t, off));
+                t->applied[TC_FEATURE_MOUSE] = false;
+                t->applied_mouse_mode        = TC_MOUSE_OFF;
+            }
+            term_note(&first, term_write(t, tc_mouse_sequence(eff, true)));
+            t->applied[TC_FEATURE_MOUSE] = true;
+            t->applied_mouse_mode        = eff;
+        }
+    }
+
+    return first;
 }

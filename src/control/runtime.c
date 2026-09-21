@@ -1,10 +1,12 @@
 #include <control/term_internal.h>
 
+#include <caps/caps_internal.h>
+
 #include <stdio.h>
 #include <string.h>
 
 /* --------------------------------------------------------------------------
- * Runtime feature toggles (docs/02 §4–§7, §10, §12).
+ * Runtime feature toggles (docs/02 §4���§7, §10, §12).
  *
  * Two state sets live on the term: `requested[]` (what the application asked
  * for, survives leave()) and `applied[]` (what was actually written). A setter
@@ -22,7 +24,7 @@ static tc_status term_write_seq(tc_term* t, const char* seq) {
 
 /* Applies one feature on an ACTIVE session: writes the on-sequence and marks
  * it applied. */
-static tc_status feature_apply_one(tc_term* t, tc_feature f) {
+tc_status tc_feature_apply_one(tc_term* t, tc_feature f) {
     tc_status st;
 
     switch (f) {
@@ -83,7 +85,7 @@ static tc_status feature_apply_one(tc_term* t, tc_feature f) {
 }
 
 /* Undoes one feature on an ACTIVE session. */
-static tc_status feature_undo_one(tc_term* t, tc_feature f) {
+tc_status tc_feature_undo_one(tc_term* t, tc_feature f) {
     tc_status st;
 
     switch (f) {
@@ -166,7 +168,7 @@ tc_status tc_term_set_feature(tc_term_t* t, tc_feature f, bool on) {
     t->requested[f] = on;
     if (t->state != TC_TERM_STATE_ACTIVE) return TC_OK;   /* enter applies it */
 
-    return on ? feature_apply_one(t, f) : feature_undo_one(t, f);
+    return on ? tc_feature_apply_one(t, f) : tc_feature_undo_one(t, f);
 }
 
 tc_status tc_term_get_feature(const tc_term_t* t, tc_feature f,
@@ -176,9 +178,20 @@ tc_status tc_term_get_feature(const tc_term_t* t, tc_feature f,
     if ((unsigned)f >= (unsigned)TC_FEATURE_COUNT) return TC_ERR_INVALID_ARG;
 
     if (requested) *requested = t->requested[f];
-    /* effective == requested until the capability layer lands (docs/03); the
-     * capability bits then narrow it to requested && capability-allowed. */
-    if (effective) *effective = t->requested[f];
+    /* effective = requested && caps allow (docs/02 ?4, docs/03 ?10.2): the
+     * capability bits narrow it. The mouse mode is degraded through the caps
+     * chain (docs/03 ?7). */
+    if (effective) {
+        *effective = t->requested[f];
+        if (*effective && t->caps) {
+            if (f == TC_FEATURE_MOUSE) {
+                *effective = tc_caps_effective_mouse(&t->caps->caps, t->mouse_mode)
+                             != TC_MOUSE_OFF;
+            } else {
+                *effective = tc_caps_allows_feature(&t->caps->caps, f);
+            }
+        }
+    }
     return TC_OK;
 }
 

@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <termcore/tc_export.h>
 #include <termcore/tc_input.h>   /* tc_event (probe feed) */
+#include <termcore/tc_memory.h>  /* tc_allocator (profile.alloc) */
 #include <termcore/tc_status.h>
 #include <termcore/tc_surface.h> /* tc_rect */
 #include <termcore/tc_term.h>    /* tc_mouse_mode (tc_caps.mouse) */
@@ -159,8 +160,13 @@ typedef struct tc_caps_profile {
     tc_caps_entry* entries;      /* per-bit detail, library-allocated */
     size_t         entry_count;
     tc_caps_fingerprint fp;
-    uint64_t       reserved[2];
+    const tc_allocator* alloc;   /* owner of `entries`; set by the library */
+    uint64_t       reserved;
 } tc_caps_profile;
+
+/* Profile serialization format version; bumped on any format change
+ * (docs/03 §10.3). A version mismatch returns TC_ERR_VERSION. */
+#define TC_CAPS_PROFILE_VERSION 1u
 
 /* Get / write (docs/03 §10.2). The profile is a snapshot: `entries` is
  * library-allocated and released by tc_caps_profile_dispose. */
