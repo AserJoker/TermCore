@@ -1,24 +1,24 @@
 # 06 · 输出渲染层 API（`tc_surface_t` + `tc_present`）
 
 渲染层负责"把单元格画出来，并高效地同步到终端"。
-模型是**渲染目标纹理**（类图形 API 的 render target）：
+模型是**离屏单元格网格 + 行级 diff**：
 
-- **surface 是离屏单元格纹理**：可创建任意数量、任意尺寸，**不绑定屏幕**，可反复复用
-- 先在各 surface 上离屏绘制，再把它们以**矩形来源**合成（blit）到目标 surface
-- 最后由 `tc_present` 把**最终 surface** 提交到屏幕——这是唯一真正写终端的动作
+- **surface 是离屏单元格网格**：可创建任意数量、任意尺寸，**不绑定屏幕**，可反复复用
+- 调用方在 surface 上直接绘制 cell；同一 surface 同时是绘制目标与提交的最终帧
+- 最后由 `tc_present` 把 surface 提交到屏幕——这是唯一真正写终端的动作
 
 ---
 
 ## 1. 职责
 
-- 离屏渲染目标（surface）与批量绘制辅助；surface 可作为矩形来源被反复合成
+- 离屏渲染目标（surface）与批量绘制辅助
 - Unicode 簇 → cell 的占位与宽字符规则（调用文本引擎）
 - 屏幕镜像（term 持有）与行级 diff
 - 转义序列生成与单次写出
 - 颜色与样式降级（按能力位集）
 - 增量变更回调、多 sink 广播、只读帧视图
 
-不做：布局、组件、换行排版策略（上层可用文本引擎自己做）。
+不做：布局、组件、图层合成、换行排版策略（上层可用文本引擎自己做）。
 
 ---
 
@@ -55,15 +55,8 @@ typedef enum tc_style {
 typedef enum tc_cell_attr {
     TC_ATTR_NONE        = 0,
     TC_ATTR_WIDE_HEAD   = 1u << 0,   /* 宽字符首格 */
-    TC_ATTR_WIDE_CONT   = 1u << 1,   /* 宽字符续格（无内容） */
-    TC_ATTR_TRANSPARENT = 1u << 2    /* 透明格：blit OVER 模式下被跳过（图层叠加用） */
+    TC_ATTR_WIDE_CONT   = 1u << 1    /* 宽字符续格（无内容） */
 } tc_cell_attr;
-
-/* 合成（blit）模式 */
-typedef enum tc_blit {
-    TC_BLIT_COPY = 0,   /* 全量覆盖：源矩形内容（含空格）整体写入目标 */
-    TC_BLIT_OVER = 1    /* 叠加：跳过源中的透明格（TC_ATTR_TRANSPARENT），其余覆盖 */
-} tc_blit;
 
 #define TC_CELL_TEXT_CAP 15
 
@@ -115,23 +108,9 @@ tc_status tc_surface_set_ambiguous_wide(tc_surface_t* s, bool wide);
 | `destroy` | 释放；不自动从 term 注销（若有帧视图在外，调用方需自行保证不再使用） |
 
 - **surface 不绑定屏幕**：`t` 仅提供 allocator、默认文本模式与能力上下文；可同时存在任意多个 surface，尺寸互不相干
-- **surface 是纯离屏纹理**，只持有一份单元格缓冲；"屏幕镜像（front）"与 `outbuf` 由 **term** 持有（见 §5）
-- surface 可**反复复用**：作绘制目标、作 blit 来源、作 present 的最终帧，三者互不排斥
+- **surface 是纯离屏网格**，只持有一份单元格缓冲；"屏幕镜像（front）"与 `outbuf` 由 **term** 持有（见 §5）
+- surface 可**反复复用**：每帧清空后重绘，或局部更新后再次 present
 - 尺寸可与终端不同：present 时按"取较小区域"处理（可配置为返回错误）
-
-### 3.1 渲染目标模型
-
-```
-离屏绘制              合成                        提交
-panel  ─┐
-status ─┼─ blit ──► root surface ──► tc_present(term, root) ──► 终端
-popup  ─┘           （最终帧，唯一）
-```
-
-- 每个图层是独立的 `tc_surface_t`，尺寸只覆盖自己需要的区域（如状态栏 1 行）
-- 图层只在内容变化时重绘（各自带脏标记），未变化时可整帧复用
-- 一帧内可 blit 任意多次；只有 `tc_present` 会写终端
-- 不强制使用图层：单 surface 直接绘制后 present 同样合法（简单应用的常见形态）
 
 ---
 
@@ -144,13 +123,6 @@ tc_status tc_surface_clear(tc_surface_t* s);
 tc_status tc_surface_draw_text(tc_surface_t* s, int32_t x, int32_t y,
                                const char* utf8, const tc_style_attr* attr,
                                tc_text_mode mode, int32_t* out_consumed_columns);
-tc_status tc_surface_scroll_rect(tc_surface_t* s, const tc_rect* r, int32_t dx, int32_t dy);
-
-/* 图层合成：把 src 的矩形区域作为来源贴到 dst（src 只读、可复用） */
-tc_status tc_surface_blit(tc_surface_t* dst, const tc_surface_t* src,
-                          const tc_rect* src_rect, int32_t dx, int32_t dy,
-                          tc_blit mode);
-tc_status tc_surface_clear_transparent(tc_surface_t* s);
 ```
 
 | API | 语义 |
@@ -159,15 +131,11 @@ tc_status tc_surface_clear_transparent(tc_surface_t* s);
 | `fill_rect` | 矩形内填同一 cell（宽字符占位会被正确处理） |
 | `clear` | 全屏填默认空格（保留默认属性） |
 | `draw_text` | 从 (x,y) 起写入字符串，自动按簇占位；**不换行**、不裁剪策略由调用方决定 |
-| `scroll_rect` | 矩形内整体平移，`dx`/`dy` 为列/行偏移，空出的区域填给定 cell |
-| `blit` | 把 `src` 的矩形区域作为来源合成到 `dst`（见 §4.2） |
-| `clear_transparent` | 全屏填**透明格**，用于叠加图层（配合 `TC_BLIT_OVER`） |
 
 约定：
 
 - 坐标 0 基；越界一律返回 `TC_ERR_INVALID_ARG`（不静默忽略，便于发现布局 bug）
 - 每次写入标记对应行为脏
-- 作为来源的 surface 是 `const`：只读、不消耗、可一帧内多次使用
 - 绘制路径**零分配**
 - `draw_text` 的 `attr` 为 NULL 时用 surface 默认属性；`mode` 用 `TC_TEXT_UNICODE` 或显式指定
 - `out_consumed_columns` 可为 NULL
@@ -186,52 +154,15 @@ tc_status tc_surface_clear_transparent(tc_surface_t* s);
 | 控制字符 | 不写入（跳过），避免把控制序列画进缓冲 |
 | ASCII 模式 | 一字节一格，无簇合并、无宽字符 |
 
-### 4.2 图层合成（`tc_surface_blit`）
-
-```c
-tc_status tc_surface_blit(tc_surface_t* dst, const tc_surface_t* src,
-                          const tc_rect* src_rect, int32_t dx, int32_t dy,
-                          tc_blit mode);
-```
-
-- `src_rect`：源矩形（列/行，相对 `src`）；传 `NULL` 表示整张源 surface
-- `dx` / `dy`：贴到 `dst` 的左上角坐标
-- `mode`：`TC_BLIT_COPY` 全量覆盖 / `TC_BLIT_OVER` 跳过透明格
-
-| 规则 | 行为 |
-| --- | --- |
-| 源只读 | `src` 不被修改、不被消耗；同一 surface 可在一帧内 blit 多次、贴到多个目标 |
-| 源矩形越界 | 超出 `src` 尺寸 → `TC_ERR_INVALID_ARG`（调用方明写的矩形，严格校验） |
-| 目标越界 | 自动裁剪到 `dst` 边界，只贴落在 dst 内的部分；**完全在界外** → `TC_ERR_INVALID_ARG` |
-| 自拷贝 | `dst == src` → `TC_ERR_INVALID_ARG`（自身位移请用 `scroll_rect` 或中间 surface） |
-| 宽字符跨界 | 源矩形切断宽字符时，复制后的孤立 `WIDE_CONT` 按 §4.1 规则清为空格 |
-| 覆盖宽字符 | 目标处被覆盖半格时，同时清除其配对格（同 §4.1） |
-| 脏标记 | `dst` 中受影响行全部标记脏 |
-| 复杂度 | O(Σ 有效区间宽度)（按 §5.2 裁剪后），行片段 memmove（cell 是 POD） |
-| 分配 | **零分配** |
-
-**透明格** = `attr & TC_ATTR_TRANSPARENT`。`tc_surface_clear_transparent(s)` 把整张 surface 清成透明，
-绘制后以 `TC_BLIT_OVER` 贴出，就只有"有内容的格"会覆盖底图——用于弹窗、浮层、水印等叠加图层。
-
-```c
-/* 每帧合成：底图 + 状态栏 + 弹窗（popup 只在需要时贴） */
-tc_surface_clear(root);
-tc_surface_blit(root, panel,  NULL, 0, 0,         TC_BLIT_COPY);   /* 全量贴底图 */
-tc_surface_blit(root, status, NULL, 0, rows - 1,  TC_BLIT_COPY);   /* 状态栏 1 行 */
-if (has_popup)
-    tc_surface_blit(root, popup, NULL, px, py,    TC_BLIT_OVER);   /* 叠加弹窗 */
-tc_present(term, root);                                             /* 只提交最终帧 */
-```
-
 ---
 
 ## 5. surface 缓冲、屏幕镜像与脏标记
 
 | 缓冲 | 归属 | 用途 |
 | --- | --- | --- |
-| **cells（back）** | surface | 调用方绘制的目标（离屏纹理，单份） |
+| **cells（back）** | surface | 调用方绘制的目标（离屏网格，单份） |
 | **front（屏幕镜像）** | **term** | 上次 present 成功后终端的已知状态 |
-| **脏行位图** | surface | 每行脏标记；`fill_rect` / `draw_text` / `scroll_rect` / `blit` 标记受影响行 |
+| **脏行位图** | surface | 每行脏标记；`fill_rect` / `draw_text` 等标记受影响行 |
 | **行哈希数组** | surface + term | 每行一个 `uint64`，用于整行跳过（§5.1） |
 | **行区间 span** | surface | 每行 `[x0, x1)` 有效列区间，用于横向裁剪（§5.2） |
 | **outbuf** | term | 生成的转义序列；复用，按 2 倍增长 |
@@ -239,8 +170,7 @@ tc_present(term, root);                                             /* 只提交
 - surface 只持有自己的单元格缓冲；**front 与 outbuf 属于 term**，因此：
   - 多个 surface 共存不会重复占用屏幕镜像内存
   - 切换 present 的 surface 不需要"整屏重绘"（front 始终是屏幕的真实状态）
-- `scroll_rect` 会标记整块区域脏（不做滚动优化的最简正确做法；可选优化见 §6.4）
-- `clear` / `clear_transparent` 标记全屏脏
+- `clear` 标记全屏脏
 - front 为"未知"时（首帧、term 尺寸变化、resume）整屏脏
 
 ### 5.1 行哈希（row hash）：一次比较跳过整行
@@ -265,9 +195,9 @@ uint64_t h = FNV1A64(cells + y * stride, (size_t)cols * sizeof(tc_cell));
 
 ```
 每行维护 span[x0, x1)：本行"被触及过"的列区间
-  clear / clear_transparent → 区间清空（整行可跳过）
-  put_cell / fill_rect / draw_text / blit → 取并集扩展区间
-  diff 与 blit 只遍历 [x0, x1)
+  clear → 区间清空（整行可跳过）
+  put_cell / fill_rect / draw_text → 取并集扩展区间
+  diff 只遍历 [x0, x1)
 ```
 
 | 项 | 约定 |
@@ -275,10 +205,8 @@ uint64_t h = FNV1A64(cells + y * stride, (size_t)cols * sizeof(tc_cell));
 | 行区间 | 每行 2 个 `int32`；`x0 >= x1` 表示空行 → 直接跳过 |
 | surface 脏矩形 | 所有脏行的包围盒；`tc_surface_dirty_rect()` 可查（自上次 present 起累积） |
 | present 之后 | 脏位与区间清空（新的一帧重新累积）；行哈希保留 |
-| 收益 | 稀疏画面（大量空白）扫描量接近 0；`blit` 也只拷贝区间内的列 |
+| 收益 | 稀疏画面（大量空白）扫描量接近 0 |
 | 与行哈希的关系 | 互补：行哈希做"纵向剪枝"，有效区间做"横向剪枝" |
-
-配合 §3.1 的图层模型：内容未变的图层既不重绘、也不重算哈希，整帧直接复用。
 
 ---
 
@@ -321,12 +249,7 @@ for y in 0..rows-1:
 若某行整行变为空白且长度超过阈值，直接输出 `ESC [ 2 K`（清行）比逐格写空格更短。
 阈值与策略为内部实现细节（可配置）。
 
-### 6.4 滚动优化（可选）
-
-`scroll_rect` 可产生 `ESC [ t ; b r` + `CSI S/T` 序列。v1 先保证正确（整块重绘），
-后续版本在"区域内多数行相同位移"时启用滚动优化，作为可选开关。
-
-### 6.5 取舍：稠密网格 vs 稀疏存储 / 矢量指令
+### 6.4 取舍：稠密网格 vs 稀疏存储 / 矢量指令
 
 "只存有效单元格（稀疏）"或"记录矢量指令（display list，重绘时重放）"都能减少遍历。
 本设计仍以**稠密 POD 网格**作为唯一权威数据，用 §5.1 / §5.2 的元数据做剪枝：
@@ -334,11 +257,8 @@ for y in 0..rows-1:
 | 方案 | 评价 |
 | --- | --- |
 | 稀疏存储（只存非空格 + 索引） | 省内存；但破坏零拷贝帧视图的**连续行布局**（`stride` 索引、memcmp、外部工具直接读），收益主要集中在大面积空白场景 |
-| 矢量指令 / display list（记录 `fill_rect` / `draw_text` / `blit`，重绘时重放） | 适合"图层不变则整帧复用"；但引入指令缓冲（分配或固定容量上限）、重放开销，且"指令语义 ≠ 最终像素"会让调试与快照测试变复杂 |
+| 矢量指令 / display list（记录 `fill_rect` / `draw_text`，重绘时重放） | 引入指令缓冲（分配或固定容量上限）、重放开销，且"指令语义 ≠ 最终像素"会让调试与快照测试变复杂；图层复用是上层（widget 层）的事，本库不做布局 |
 | **采用：稠密网格 + 行哈希 + 有效区间 + 脏矩形** | 遍历量已接近稀疏方案（三层剪枝后只剩真正变化的格子），同时保留 POD 布局、零拷贝视图、逐格 memcmp 与快照可测性，**运行期零分配** |
-
-可选开关（后续版本，默认关闭）：`tc_surface_set_display_list(s, bool)` —— 打开后 surface 记录绘制指令，
-只在指令列表变化时重放并重建 cells；未变化的图层跳过光栅化与哈希计算。v1 先保证简单、可测、零分配。
 
 结论：遍历不是"无脑逐格"——脏行 → 行哈希 → 有效区间三层剪枝之后，
 才对可能变化的格子做 32 字节 memcmp 与 run 合并扫描。
@@ -402,7 +322,7 @@ tc_status tc_present(tc_term_t* t, tc_surface_t* s);
 约束：
 
 - `tc_present` 是**同步阻塞**的：返回时一帧已提交完毕
-- 一次 present 只提交**一张最终 surface**；图层合成应在 present 之前用 `blit` 完成
+- 一次 present 只提交**一张最终 surface**；调用方应先在 surface 上完成本帧全部绘制
 - 回调内**禁止**调用 `tc_present` 或写 surface
 - 每帧零分配（outbuf 已在 create 时备好；增长只在极少数首帧发生，之后复用）
 
@@ -410,11 +330,16 @@ tc_status tc_present(tc_term_t* t, tc_surface_t* s);
 
 ## 10. 增量变更回调
 
+> **调试基础设施（§10–§12），先于渲染核心实现。** 多 sink 广播、变更回调与只读帧视图是
+> 离线测试、快照比对、录制回放与外部工具集成的**基础**：没有它们，渲染正确性无法在
+> CI / headless 下验证，真实终端的差异也无从诊断。因此实现顺序上，§10–§12 的观测通道
+> 与 surface 绘制、diff 一起落地，而不是最后补。
+
 ```c
 typedef enum tc_change_kind {
     TC_CHANGE_CELL   = 1,   /* 单个单元格变化 */
     TC_CHANGE_RECT   = 2,   /* 矩形区域变化（含新内容快照） */
-    TC_CHANGE_SCROLL = 3,   /* 区域滚动 */
+    TC_CHANGE_SCROLL = 3,   /* 区域滚动（diff 识别出的整体位移；与绘制 API 无关） */
     TC_CHANGE_CLEAR  = 4,   /* 清屏 / 整行清空 */
     TC_CHANGE_CURSOR = 5    /* 光标位置变化 */
 } tc_change_kind;
@@ -511,7 +436,6 @@ tc_status tc_surface_view(const tc_surface_t* s, tc_frame_view* out);
 | 单元格内存 | `tc_cell` ≈ 32 字节；200×50 的 surface ≈ 320 KB（单缓冲）；term 的屏幕镜像另占约 320 KB（全局仅一份） |
 | 行元数据 | 200×50：行哈希 50×8 B + 行区间 50×8 B ≈ 0.8 KB（相对 cells 可忽略） |
 | diff | 三层剪枝后 O(脏行数 + Σ 有效区间宽度)；最坏（全脏）约 10K 次 32 字节 memcmp ≈ 亚毫秒级，典型帧远小于此 |
-| blit | 只拷行区间内的列：200×50 全屏合成 ≈ 320 KB memmove，亚毫秒级 |
 | 输出 | 全屏重绘 80×24 ≈ 3–6 KB；200×50 ≈ 20–40 KB（罕见） |
 | 写入 | 单次 write；终端侧解析为主要成本 |
 | 分配 | 首帧可能有 outbuf 增长；之后每帧 0 次分配 |
@@ -523,7 +447,6 @@ tc_status tc_surface_view(const tc_surface_t* s, tc_frame_view* out);
 - 行级脏标记 + run 合并（主要手段）
 - SGR 与光标状态记忆，避免重复输出
 - 宽字符续格跳过
-- 图层复用：内容未变的图层不重绘、不重算哈希
 - 整行清空用 `ESC [ 2 K`
 - outbuf 复用与批量写
 
@@ -532,29 +455,26 @@ tc_status tc_surface_view(const tc_surface_t* s, tc_frame_view* out);
 ## 14. 典型用法
 
 ```c
-/* 1) 离屏图层：各画各的，尺寸只覆盖自己需要的区域 */
-tc_surface_t* root = NULL, *status = NULL;
-tc_surface_create(term, cols, rows, &root);
-tc_surface_create(term, cols, 1,   &status);   /* 状态栏：1 行 */
+/* 1) 单个 surface：直接绘制，作为提交的最终帧 */
+tc_surface_t* s = NULL;
+tc_surface_create(term, cols, rows, &s);
 
-tc_cell c; tc_cell_blank(&c);
-c.fg = tc_color_rgb(0xE0, 0xE0, 0xE0);
-c.bg = tc_color_indexed(24);
-c.style = TC_STYLE_BOLD;
+tc_style_attr attr;
+attr.fg = tc_color_rgb(0xE0, 0xE0, 0xE0);
+attr.bg = tc_color_indexed(24);
+attr.style = TC_STYLE_BOLD;
 
-tc_surface_fill_rect(status, &(tc_rect){0, 0, cols, 1}, &c);
-tc_surface_draw_text(status, 2, 0, "终端 TUI", &c /*attr*/, TC_TEXT_UNICODE, NULL);
+/* 2) 逐帧绘制（局部更新：只重画变化区域即可） */
+tc_surface_draw_text(s, 0, 0, "终端 TUI", &attr, TC_TEXT_UNICODE, NULL);
+tc_surface_put_cell(s, 5, 3, &(tc_cell){ .fg = tc_color_rgb(0xFF,0,0), .text = "X", .len = 1 });
 
-/* 2) 合成到最终帧（status 未变化时无需重画，复贴即可） */
-tc_surface_clear(root);
-draw_body(root);                                          /* 主内容离屏绘制 */
-tc_surface_blit(root, status, NULL, 0, rows - 1, TC_BLIT_COPY);
-
-/* 3) 只提交最终帧 */
-tc_present(term, root);
+/* 3) 提交：diff 只输出变化，单次 write */
+tc_present(term, s);
 ```
 
-单 surface 直接绘制后 present 同样合法（简单应用的常见形态），图层只是可选的组织方式。
+复杂界面（状态栏、弹窗等）由调用方自行组织：可以在一个 surface 上直接拼装，
+也可以维护多个 surface、把各自内容写入同一个最终 surface 后 present（本库不提供图层合成，
+如何拼装是上层布局策略）。
 
 ---
 
@@ -576,10 +496,6 @@ tc_status tc_surface_clear(tc_surface_t* s);
 tc_status tc_surface_draw_text(tc_surface_t* s, int32_t x, int32_t y, const char* utf8,
                                const tc_style_attr* attr, tc_text_mode mode,
                                int32_t* out_consumed_columns);
-tc_status tc_surface_scroll_rect(tc_surface_t* s, const tc_rect* r, int32_t dx, int32_t dy);
-tc_status tc_surface_blit(tc_surface_t* dst, const tc_surface_t* src,
-                          const tc_rect* src_rect, int32_t dx, int32_t dy, tc_blit mode);
-tc_status tc_surface_clear_transparent(tc_surface_t* s);
 
 /* 提交与观测 */
 tc_status tc_present(tc_term_t* t, tc_surface_t* s);

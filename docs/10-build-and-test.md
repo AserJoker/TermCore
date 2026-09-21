@@ -219,7 +219,7 @@ cmake -DTERMCORE_USE_ICU=ON ..
 - 颜色降级：真彩 → 256 → 16 → 单色
 - present：失败不更新 front、sink 失败隔离、frame_id 递增
 - 剪枝正确性：行哈希快路径与 `strict_diff` 逐格比对结果一致；"标脏但未变"的行被跳过；有效区间裁剪后输出不变
-- 图层：blit 源只读可复用、源矩形越界报错、目标越界裁剪、OVER 跳过透明格、自拷贝报错、宽字符跨界
+- 绘制：`put_cell` / `fill_rect` 越界报错、`draw_text` 宽字符占位与覆盖半格清除、坐标裁剪
 - 运行时开关：开 / 关幂等（重复设同值不重复写序列）、`CREATED` 态设置延后到 `enter` 生效、能力不支持返回 `TC_ERR_UNSUPPORTED` 且状态不变、渐进特性 `requested ≠ effective` 可查、鼠标四档切换正确、关闭后残留序列被识别但不产出事件、`leave` 只关已生效项
 - 帧视图：布局、只读、失效语义
 
@@ -255,7 +255,7 @@ cmake -DTERMCORE_USE_ICU=ON ..
 | `events_demo` | 打印所有事件的 kind 与字段（键、鼠标、焦点、粘贴、resize）；退出时用 CTRL_C / `q` |
 | `mouse_demo` | 鼠标按下 / 拖动 / 滚轮绘制；显示坐标与修饰键 |
 | `palette_demo` | 16 / 256 / 真彩色板与渐变；直观验证颜色降级 |
-| `scroll_demo` | `scroll_rect` 滚动区域 + 双缓冲局部更新 |
+| `scroll_demo` | 滚动区域绘制（上层自实现平移，验证 diff 只输出变化行） |
 | `unicode_width_demo` | CJK、emoji ZWJ、组合符、RI 国旗的宽度与占位；可切 ASCII / Unicode 模式 |
 
 每个 demo 都应支持 `--headless` 便于 CI 冒烟（跑几帧后退出并自检无错误）。

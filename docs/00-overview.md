@@ -93,14 +93,14 @@ TermCore 是**终端 TUI 的底层 API 库**：用 C11 编写、导出稳定 C A
 | 概念 | TermCore | 说明 |
 | --- | --- | --- |
 | 会话句柄 | `tc_term_t*` | 不透明；`tc_term_create(opt, &out)` 创建，`tc_term_destroy` 严格配对 |
-| 绘制目标句柄 | `tc_surface_t*` | 不透明；离屏单元格缓冲，可绘制、可相互合成 |
+| 绘制目标句柄 | `tc_surface_t*` | 不透明；离屏单元格缓冲，可反复绘制并提交 |
 | 进入 / 退出 | `tc_term_enter` / `tc_term_leave` | `enter` 开 raw / altscreen / 鼠标 / 焦点并注册恢复钩子；`leave` 幂等 |
 | 等待 | `tc_wait_event(term, timeout_ms, &ready)` | `0` = 非阻塞（推荐）；`> 0` OS 级等待；库不 sleep / 不忙等 |
 | 窥视 / 取走 | `tc_peek_event` / `tc_get_event` | 不取走 / 取走一条；调用方自写 `switch` 分发 |
 | 事件结构 | `tc_event`（kind + 联合） | 结构化字段，不用"参数位"式整数编码 |
 | 字节 → 事件 | 解析器状态机 | 序列解码与归一化 |
 | 尺寸 | `tc_term_get_size` / `TC_EV_RESIZE` | 行列尺寸 |
-| 绘制 | `tc_surface_fill_rect` / `draw_text` / `scroll_rect` / `blit` | 单元格级原语 + 批量辅助 |
+| 绘制 | `tc_surface_fill_rect` / `draw_text` | 单元格级原语 + 批量辅助 |
 | 提交 | `tc_present(term, surface)` | 同步阻塞：diff → 生成序列 → 广播 sink → 单次 flush |
 | 错误 | `tc_status` | 仅返回码，不提供"取最后一次错误" |
 | 输入事件回调 | **不提供** | 输入事件一律拉取 |
