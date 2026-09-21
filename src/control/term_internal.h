@@ -22,6 +22,7 @@ extern "C" {
 typedef struct tc_term tc_term;
 
 struct tc_input;   /* input layer (docs/04); completed in input/input_internal.h */
+struct tc_caps_state;  /* capability layer (docs/03); completed in caps/caps_internal.h */
 
 typedef enum tc_term_state {
     TC_TERM_STATE_CREATED = 0,
@@ -68,6 +69,10 @@ struct tc_term {
     /* Input layer state (docs/04): event queue, parser, injection buffers.
      * Allocated in create, freed in destroy, zero allocation at runtime. */
     struct tc_input* input;
+
+    /* Capability state (docs/03): detection-chain conclusion plus any override.
+     * Allocated in create, freed in destroy. */
+    struct tc_caps_state* caps;
 
     /* render-layer state, owned by term (docs/06 §5). front mirrors the last
      * successfully presented frame; outbuf is the reusable escape-sequence

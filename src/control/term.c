@@ -1,5 +1,6 @@
 #include <termcore/tc_term.h>
 
+#include <caps/caps_internal.h>
 #include <control/signal_internal.h>
 #include <control/term_internal.h>
 #include <input/input_internal.h>
@@ -190,8 +191,17 @@ tc_status tc_term_create(const tc_term_options* opt, tc_term_t** out) {
         return st;
     }
 
-    /* TODO(caps): with opt->caps_profile / query_capabilities, probe or adopt
-     * the capability bits here โÿÿ the capability layer (docs/03) owns it. */
+    /* Capability layer (docs/03): run the detection chain and keep the
+     * conclusion on the term. Never blocks startup; the DA query (stage D)
+     * is time-boxed and skipped in headless / CI. */
+    st = tc_caps_state_create(alloc, opt, &t->caps);
+    if (st != TC_OK) {
+        tc_input_destroy(t);
+        tc_backend_destroy(t->backend);
+        t->backend = NULL;
+        alloc->free(alloc->ctx, t, sizeof(*t));
+        return st;
+    }
 
     term_register(t);
 
@@ -263,6 +273,8 @@ void tc_term_destroy(tc_term_t* t) {
 
     if (!t) return;
 
+    alloc = t->alloc ? t->alloc : tc_allocator_default();
+
     (void)tc_term_leave(t);
 
     term_unregister(t);
@@ -271,12 +283,15 @@ void tc_term_destroy(tc_term_t* t) {
         tc_input_destroy(t);
     }
 
+    if (t->caps) {
+        tc_caps_state_destroy(alloc, t->caps);
+        t->caps = NULL;
+    }
+
     if (t->backend) {
         tc_backend_destroy(t->backend);
         t->backend = NULL;
     }
-
-    alloc = t->alloc ? t->alloc : tc_allocator_default();
 
     /* Render-layer buffers (front mirror + outbuf) are owned by the term and
      * allocated lazily at the first tc_present (docs/06 ยง5). */

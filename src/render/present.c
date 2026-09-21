@@ -1,5 +1,6 @@
 #include <termcore/tc_surface.h>
 
+#include <caps/caps_internal.h>
 #include <control/term_internal.h>
 #include <platform/backend.h>
 #include <render/render_internal.h>
@@ -142,6 +143,23 @@ static bool color_equal(const tc_color* a, const tc_color* b) {
     }
 }
 
+/* Colour degradation at output time (docs/03 ?3): the diff compares the
+ * caller's raw colours, but what reaches the terminal is the degradation of
+ * the session's effective caps. `caps` may be NULL (term without caps state),
+ * in which case the colour passes through unchanged. */
+static tc_color downgrade_color(const tc_caps* caps, const tc_color* c) {
+    tc_color out = *c;
+    if (!caps) return out;
+    if (c->kind == TC_COLOR_RGB) {
+        if (tc_caps_downgrade_rgb(caps, c->r, c->g, c->b, &out) != TC_OK)
+            out = *c;
+    } else if (c->kind == TC_COLOR_INDEXED) {
+        if (tc_caps_downgrade_indexed(caps, c->idx, &out) != TC_OK)
+            out = *c;
+    }
+    return out;
+}
+
 /* Appends the SGR parameters for one cell as a *transition* from `prev` (the
  * last SGR we emitted, or NULL on the frame's first run: the terminal state
  * is unknown there, so a base reset is included). The caller has already
@@ -180,7 +198,7 @@ static int sgr_write(tc_term* t, const tc_cell* c, const tc_cell* prev) {
     }
 
     /* Foreground: only when it actually changes, or was wiped by the reset
-     * (a default color needs nothing after "0" â€” the reset already set it). */
+     * (a default color needs nothing after "0" âÿÿ the reset already set it). */
     switch (c->fg.kind) {
     case TC_COLOR_DEFAULT: if (!fg_same && !base_reset) n += sprintf(params + n, "39;"); break;
     case TC_COLOR_INDEXED: if (!fg_same || base_reset) n += sprintf(params + n, "38;5;%u;", c->fg.idx); break;
@@ -223,6 +241,7 @@ tc_status tc_present(tc_term_t* t, tc_surface_t* s) {
     int32_t     vcur_y = -1;   /* first run to emit an explicit CUP */
     bool        have_sgr = false;
     tc_cell     cur_sgr_cell;   /* last SGR we emitted for */
+    const tc_caps* caps = m->caps ? &m->caps->caps : NULL;
 
     if (!t || !s) return TC_ERR_INVALID_ARG;
     if (m->state != TC_TERM_STATE_ACTIVE) return TC_ERR_STATE;
@@ -316,19 +335,25 @@ tc_status tc_present(tc_term_t* t, tc_surface_t* s) {
                 vcur_y = y;
             }
 
-            /* SGR: emit only when it differs from the current state. */
+            /* SGR: emit only when it differs from the current state. The
+             * comparison and the emission both work on the degraded copy:
+             * two different raw colours that degrade to the same terminal
+             * colour do not re-state SGR. */
             const tc_cell* head = &s->cells[(size_t)y * s->cols + run_start];
             const tc_cell* prev = have_sgr ? &cur_sgr_cell : NULL;
+            tc_cell        head_d = *head;
+            head_d.fg = downgrade_color(caps, &head->fg);
+            head_d.bg = downgrade_color(caps, &head->bg);
             if (!have_sgr ||
-                head->style != cur_sgr_cell.style ||
-                !color_equal(&head->fg, &cur_sgr_cell.fg) ||
-                !color_equal(&head->bg, &cur_sgr_cell.bg)) {
+                head_d.style != cur_sgr_cell.style ||
+                !color_equal(&head_d.fg, &cur_sgr_cell.fg) ||
+                !color_equal(&head_d.bg, &cur_sgr_cell.bg)) {
                 /* sgr_write emits the parameters without the CSI envelope;
                  * assemble "\x1b[<params>m" ourselves. */
                 if (outbuf_append(m, "\x1b[", 2) != TC_OK) return TC_ERR_NOMEM;
-                if (sgr_write(m, head, prev) < 0) return TC_ERR_NOMEM;
+                if (sgr_write(m, &head_d, prev) < 0) return TC_ERR_NOMEM;
                 if (outbuf_append(m, "m", 1) != TC_OK) return TC_ERR_NOMEM;
-                cur_sgr_cell = *head;
+                cur_sgr_cell = head_d;
                 have_sgr = true;
             }
 

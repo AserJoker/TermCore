@@ -8,6 +8,8 @@
  */
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -18,6 +20,44 @@
 #include <render/render_internal.h>
 
 namespace {
+
+/* Sets / restores an environment variable for the lifetime of the object. */
+class ScopedEnv {
+public:
+    ScopedEnv(const char* name, const char* value) : name_(name) {
+        const char* old = std::getenv(name);
+        had_old_        = (old != nullptr);
+        if (had_old_) old_ = old;
+        set(name, value);
+    }
+    ~ScopedEnv() {
+        if (had_old_) {
+            set(name_.c_str(), old_.c_str());
+        } else {
+            unset(name_.c_str());
+        }
+    }
+
+private:
+    static void set(const char* n, const char* v) {
+#ifdef _WIN32
+        _putenv_s(n, v);
+#else
+        setenv(n, v, 1);
+#endif
+    }
+    static void unset(const char* n) {
+#ifdef _WIN32
+        _putenv_s(n, "");
+#else
+        unsetenv(n);
+#endif
+    }
+
+    std::string name_;
+    std::string old_;
+    bool        had_old_ = false;
+};
 
 tc_term_options headless_options(const tc_allocator* alloc = nullptr) {
     tc_term_options opt;
@@ -192,7 +232,10 @@ protected:
     tc_term_t*       term = nullptr;
 };
 
-/* A fixture that also enters the session, for present tests. */
+/* A fixture that also enters the session, for present tests. The env override
+ * forces a deterministic truecolor conclusion (TERMCORE_CAPS beats the whole
+ * detection chain, docs/03 §2) so the colour expectations don't depend on the
+ * ambient shell environment. */
 class PresentTest : public SurfaceTest {
 protected:
     void SetUp() override {
@@ -200,6 +243,7 @@ protected:
         ASSERT_EQ(tc_term_enter(term), TC_OK);
         cap = attach_capture_backend(term);
     }
+    ScopedEnv        caps_env_{"TERMCORE_CAPS", "0x4"};   /* truecolor */
     capture_backend* cap = nullptr;
 };
 
@@ -645,4 +689,113 @@ TEST_F(PresentTest, FrontFreesOnTermDestroy) {
     tc_surface_destroy(s);
     tc_term_destroy(term);
     term = nullptr;
+}
+
+/* --------------------------------------------------------------------------
+ * Colour degradation at present time (docs/03 §3)
+ *
+ * These tests create their own term under a forced TERMCORE_CAPS so the caps
+ * conclusion is deterministic, then assert the exact bytes the terminal
+ * receives. TERMCORE_CAPS overrides the whole detection chain (docs/03 §2).
+ * ------------------------------------------------------------------------ */
+
+TEST(RenderDowngrade, Level256EmitsNearestIndex) {
+    ScopedEnv bits("TERMCORE_CAPS", "0x2");   /* 256 colours */
+
+    tc_term_options opt = headless_options();
+    tc_term_t*      term = nullptr;
+    ASSERT_EQ(tc_term_create(&opt, &term), TC_OK);
+    ASSERT_EQ(tc_term_enter(term), TC_OK);
+    ASSERT_EQ(tc_term_set_size(term, 2, 1), TC_OK);
+    capture_backend* cap = attach_capture_backend(term);
+
+    tc_surface_t* s = nullptr;
+    ASSERT_EQ(tc_surface_create(term, 2, 1, &s), TC_OK);
+
+    /* (255,128,0) -> cube index 208 = (255,135,0), the nearest palette entry. */
+    tc_cell c = cell_with_text('r');
+    c.fg      = tc_color_rgb(255, 128, 0);
+    ASSERT_EQ(tc_surface_put_cell(s, 0, 0, &c), TC_OK);
+    ASSERT_EQ(tc_present(term, s), TC_OK);
+
+    EXPECT_EQ(cap_out(cap), "\x1b[1;1H\x1b[0;38;5;208mr");
+
+    tc_surface_destroy(s);
+    tc_term_destroy(term);
+}
+
+TEST(RenderDowngrade, Level256IndexedPassesThrough) {
+    ScopedEnv bits("TERMCORE_CAPS", "0x2");
+
+    tc_term_options opt = headless_options();
+    tc_term_t*      term = nullptr;
+    ASSERT_EQ(tc_term_create(&opt, &term), TC_OK);
+    ASSERT_EQ(tc_term_enter(term), TC_OK);
+    ASSERT_EQ(tc_term_set_size(term, 2, 1), TC_OK);
+    capture_backend* cap = attach_capture_backend(term);
+
+    tc_surface_t* s = nullptr;
+    ASSERT_EQ(tc_surface_create(term, 2, 1, &s), TC_OK);
+
+    tc_cell c = cell_with_text('i');
+    c.fg      = tc_color_indexed(42);
+    ASSERT_EQ(tc_surface_put_cell(s, 0, 0, &c), TC_OK);
+    ASSERT_EQ(tc_present(term, s), TC_OK);
+
+    EXPECT_EQ(cap_out(cap), "\x1b[1;1H\x1b[0;38;5;42mi");
+
+    tc_surface_destroy(s);
+    tc_term_destroy(term);
+}
+
+TEST(RenderDowngrade, Level16EmitsNearestSystemColor) {
+    ScopedEnv bits("TERMCORE_CAPS", "0x1");   /* 16 colours */
+
+    tc_term_options opt = headless_options();
+    tc_term_t*      term = nullptr;
+    ASSERT_EQ(tc_term_create(&opt, &term), TC_OK);
+    ASSERT_EQ(tc_term_enter(term), TC_OK);
+    ASSERT_EQ(tc_term_set_size(term, 2, 1), TC_OK);
+    capture_backend* cap = attach_capture_backend(term);
+
+    tc_surface_t* s = nullptr;
+    ASSERT_EQ(tc_surface_create(term, 2, 1, &s), TC_OK);
+
+    /* (255,128,0) ties between 3 (128,128,0) and 11 (255,255,0) at distance
+     * 16129; the scan starts at 0 so the lower index wins. */
+    tc_cell c = cell_with_text('r');
+    c.fg      = tc_color_rgb(255, 128, 0);
+    ASSERT_EQ(tc_surface_put_cell(s, 0, 0, &c), TC_OK);
+    ASSERT_EQ(tc_present(term, s), TC_OK);
+
+    EXPECT_EQ(cap_out(cap), "\x1b[1;1H\x1b[0;38;5;3mr");
+
+    tc_surface_destroy(s);
+    tc_term_destroy(term);
+}
+
+TEST(RenderDowngrade, MonoDropsColorKeepsStyle) {
+    ScopedEnv bits("TERMCORE_CAPS", "0x0");   /* MONO */
+
+    tc_term_options opt = headless_options();
+    tc_term_t*      term = nullptr;
+    ASSERT_EQ(tc_term_create(&opt, &term), TC_OK);
+    ASSERT_EQ(tc_term_enter(term), TC_OK);
+    ASSERT_EQ(tc_term_set_size(term, 2, 1), TC_OK);
+    capture_backend* cap = attach_capture_backend(term);
+
+    tc_surface_t* s = nullptr;
+    ASSERT_EQ(tc_surface_create(term, 2, 1, &s), TC_OK);
+
+    tc_cell c = cell_with_text('r');
+    c.fg      = tc_color_rgb(255, 0, 0);
+    c.style   = TC_STYLE_BOLD;
+    ASSERT_EQ(tc_surface_put_cell(s, 0, 0, &c), TC_OK);
+    ASSERT_EQ(tc_present(term, s), TC_OK);
+
+    /* Colour gone, the bold style survives: "\x1b[0;1m". */
+    EXPECT_EQ(cap_out(cap), "\x1b[1;1H\x1b[0;1mr");
+
+    tc_surface_destroy(s);
+    tc_term_destroy(term);
 }
